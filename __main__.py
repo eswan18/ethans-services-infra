@@ -317,6 +317,47 @@ display_name="ArgoCD Image Updater",
     opts = pulumi.ResourceOptions(protect=True),
 )
 
+# Workload Identity bindings
+fitness_api_prod_wi = serviceaccount.IAMMember("fitness-api-prod-workload-identity",
+    service_account_id=fitness_api_prod_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[fitness-api-prod/fitness-api-prod-ksa]",
+)
+fitness_api_staging_wi = serviceaccount.IAMMember("fitness-api-staging-workload-identity",
+    service_account_id=fitness_api_staging_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[fitness-api-staging/fitness-api-staging-ksa]",
+)
+identity_prod_wi = serviceaccount.IAMMember("identity-prod-workload-identity",
+    service_account_id=identity_prod_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[identity-prod/identity-prod-ksa]",
+)
+identity_staging_wi = serviceaccount.IAMMember("identity-staging-workload-identity",
+    service_account_id=identity_staging_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[identity-staging/identity-staging-ksa]",
+)
+
+# Secret Manager access
+fitness_api_prod_secrets = projects.IAMMember("fitness-api-prod-secret-access",
+    project=project,
+    role="roles/secretmanager.secretAccessor",
+    member=fitness_api_prod_sa.email.apply(lambda email: f"serviceAccount:{email}"),
+)
+fitness_api_staging_secrets = projects.IAMMember("fitness-api-staging-secret-access",
+    project=project,
+    role="roles/secretmanager.secretAccessor",
+    member=fitness_api_staging_sa.email.apply(lambda email: f"serviceAccount:{email}"),
+)
+
+# Artifact Registry access for ArgoCD Image Updater
+argocd_image_updater_ar = projects.IAMMember("argocd-image-updater-ar-access",
+    project=project,
+    role="roles/artifactregistry.reader",
+    member=argocd_image_updater_sa.email.apply(lambda email: f"serviceAccount:{email}"),
+)
+
 
 # Export cluster info
 pulumi.export("cluster_name", main_cluster.name)
