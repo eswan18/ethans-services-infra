@@ -2,7 +2,7 @@
 
 import pulumi
 from pulumi import ResourceOptions
-from pulumi_gcp import container, serviceaccount, projects, artifactregistry
+from pulumi_gcp import container, serviceaccount, projects, artifactregistry, secretmanager, cloudbuild
 
 # Configuration
 project = "ethans-services"
@@ -358,6 +358,81 @@ argocd_image_updater_ar = projects.IAMMember("argocd-image-updater-ar-access",
     member=argocd_image_updater_sa.email.apply(lambda email: f"serviceAccount:{email}"),
 )
 
+# Secret Manager secrets (structure only - values managed outside Pulumi)
+secret_names = [
+    # fitness-api prod
+    "fitness_api_prod_database_url",
+    "fitness_api_prod_google_client_id",
+    "fitness_api_prod_google_client_secret",
+    "fitness_api_prod_hevy_api_key",
+    "fitness_api_prod_strava_client_id",
+    "fitness_api_prod_strava_client_secret",
+    "fitness_api_prod_trmnl_api_key",
+    # fitness-api staging
+    "fitness_api_staging_database_url",
+    "fitness_api_staging_google_client_id",
+    "fitness_api_staging_google_client_secret",
+    "fitness_api_staging_hevy_api_key",
+    "fitness_api_staging_strava_client_id",
+    "fitness_api_staging_strava_client_secret",
+    "fitness_api_staging_trmnl_api_key",
+    # identity prod
+    "identity_prod_database_url",
+    "identity_prod_jwt_private_key",
+    "identity_prod_resend_api_key",
+    "identity_prod_storage_access_key",
+    "identity_prod_storage_secret_key",
+    "identity_prod_storage_token",
+    # identity staging
+    "identity_staging_admin_database_url",
+    "identity_staging_database_url",
+    "identity_staging_jwt_private_key",
+    "identity_staging_resend_api_key",
+    "identity_staging_storage_access_key",
+    "identity_staging_storage_secret_key",
+    "identity_staging_storage_token",
+]
+secrets = {}
+for name in secret_names:
+    secrets[name] = secretmanager.Secret(
+        name,
+        secret_id=name,
+        project=project,
+        replication=secretmanager.SecretReplicationArgs(
+            auto=secretmanager.SecretReplicationAutoArgs(),
+        ),
+        opts=pulumi.ResourceOptions(protect=True),
+    )
+
+# Cloud Build triggers
+fitness_api_build = cloudbuild.Trigger("fitness-api-build",
+    filename="cloudbuild.yaml",
+    github=cloudbuild.TriggerGithubArgs(
+        name="fitness-api",
+        owner="eswan18",
+        push=cloudbuild.TriggerGithubPushArgs(
+            branch="^main$",
+        ),
+    ),
+    name="fitness-api-build",
+    project=project,
+    service_account=f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com",
+    opts=pulumi.ResourceOptions(protect=True),
+)
+identity_build = cloudbuild.Trigger("identity-build",
+    filename="cloudbuild.yaml",
+    github=cloudbuild.TriggerGithubArgs(
+        name="identity",
+        owner="eswan18",
+        push=cloudbuild.TriggerGithubPushArgs(
+            branch="^main$",
+        ),
+    ),
+    name="identity-build",
+    project=project,
+    service_account=f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com",
+    opts=pulumi.ResourceOptions(protect=True),
+)
 
 # Export cluster info
 pulumi.export("cluster_name", main_cluster.name)
