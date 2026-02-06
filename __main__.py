@@ -285,6 +285,38 @@ main_cluster = container.Cluster("main-cluster",
     opts = pulumi.ResourceOptions(protect=True),
 )
 
+# Service Accounts
+identity_staging_sa = serviceaccount.Account("identity-staging-sa",
+    account_id="identity-staging-sa",
+    display_name="Identity Staging Service Account",
+    project="ethans-services",
+    opts = pulumi.ResourceOptions(protect=True),
+)
+identity_prod_sa = serviceaccount.Account("identity-prod-sa",
+    account_id="identity-prod-sa",
+    display_name="Identity Prod Service Account",
+    project="ethans-services",
+    opts = pulumi.ResourceOptions(protect=True),
+)
+fitness_api_staging_sa = serviceaccount.Account("fitness-api-staging-sa",
+    account_id="fitness-api-staging-sa",
+    display_name="Fitness API Staging",
+    project="ethans-services",
+    opts = pulumi.ResourceOptions(protect=True),
+)
+fitness_api_prod_sa = serviceaccount.Account("fitness-api-prod-sa",
+    account_id="fitness-api-prod-sa",
+    display_name="Fitness API Prod",
+    project="ethans-services",
+    opts = pulumi.ResourceOptions(protect=True),
+)
+argocd_image_updater_sa = serviceaccount.Account("argocd-image-updater-sa",
+account_id="argocd-image-updater-sa",
+display_name="ArgoCD Image Updater",
+    project="ethans-services",
+    opts = pulumi.ResourceOptions(protect=True),
+)
+
 
 # Export cluster info
 pulumi.export("cluster_name", main_cluster.name)
