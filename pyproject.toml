@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "ethans-services-infra"
@@ -14,5 +14,16 @@ dependencies = [
 [project.scripts]
 deploy = "deploy:main"
 
-[tool.setuptools]
-py-modules = ["deploy"]
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.0",
+    "ty>=0.0.15",
+]
+
+[tool.ty.src]
+# Exclude Pulumi entrypoint — Pulumi's type stubs produce false positives
+# with TypedDict inputs and Output.apply() lambdas.
+exclude = ["__main__.py"]

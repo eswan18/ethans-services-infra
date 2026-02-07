@@ -1,8 +1,14 @@
 """Infrastructure for Ethan's Services in GCP"""
 
 import pulumi
-from pulumi import ResourceOptions
-from pulumi_gcp import container, serviceaccount, projects, artifactregistry, secretmanager, cloudbuild
+from pulumi_gcp import (
+    container,
+    serviceaccount,
+    projects,
+    artifactregistry,
+    secretmanager,
+    cloudbuild,
+)
 
 # Configuration
 project = "ethans-services"
@@ -23,7 +29,8 @@ container_registry = artifactregistry.Repository(
 )
 
 # GKE Cluster
-main_cluster = container.Cluster("main-cluster",
+main_cluster = container.Cluster(
+    "main-cluster",
     addons_config={
         "gce_persistent_disk_csi_driver_config": {
             "enabled": True,
@@ -284,53 +291,62 @@ main_cluster = container.Cluster("main-cluster",
     workload_identity_config={
         "workload_pool": f"{project}.svc.id.goog",
     },
-    opts = pulumi.ResourceOptions(protect=True),
+    opts=pulumi.ResourceOptions(protect=True),
 )
 
 # Service Accounts
-identity_staging_sa = serviceaccount.Account("identity-staging-sa",
+identity_staging_sa = serviceaccount.Account(
+    "identity-staging-sa",
     account_id="identity-staging-sa",
     display_name="Identity Staging Service Account",
     project=project,
 )
-identity_prod_sa = serviceaccount.Account("identity-prod-sa",
+identity_prod_sa = serviceaccount.Account(
+    "identity-prod-sa",
     account_id="identity-prod-sa",
     display_name="Identity Prod Service Account",
     project=project,
 )
-fitness_api_staging_sa = serviceaccount.Account("fitness-api-staging-sa",
+fitness_api_staging_sa = serviceaccount.Account(
+    "fitness-api-staging-sa",
     account_id="fitness-api-staging-sa",
     display_name="Fitness API Staging",
     project=project,
 )
-fitness_api_prod_sa = serviceaccount.Account("fitness-api-prod-sa",
+fitness_api_prod_sa = serviceaccount.Account(
+    "fitness-api-prod-sa",
     account_id="fitness-api-prod-sa",
     display_name="Fitness API Prod",
     project=project,
 )
-argocd_image_updater_sa = serviceaccount.Account("argocd-image-updater-sa",
+argocd_image_updater_sa = serviceaccount.Account(
+    "argocd-image-updater-sa",
     account_id="argocd-image-updater-sa",
     display_name="ArgoCD Image Updater",
     project=project,
 )
 
 # Workload Identity bindings
-fitness_api_prod_wi = serviceaccount.IAMMember("fitness-api-prod-workload-identity",
+fitness_api_prod_wi = serviceaccount.IAMMember(
+    "fitness-api-prod-workload-identity",
     service_account_id=fitness_api_prod_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[fitness-api-prod/fitness-api-prod-ksa]",
 )
-fitness_api_staging_wi = serviceaccount.IAMMember("fitness-api-staging-workload-identity",
+fitness_api_staging_wi = serviceaccount.IAMMember(
+    "fitness-api-staging-workload-identity",
     service_account_id=fitness_api_staging_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[fitness-api-staging/fitness-api-staging-ksa]",
 )
-identity_prod_wi = serviceaccount.IAMMember("identity-prod-workload-identity",
+identity_prod_wi = serviceaccount.IAMMember(
+    "identity-prod-workload-identity",
     service_account_id=identity_prod_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[identity-prod/identity-prod-ksa]",
 )
-identity_staging_wi = serviceaccount.IAMMember("identity-staging-workload-identity",
+identity_staging_wi = serviceaccount.IAMMember(
+    "identity-staging-workload-identity",
     service_account_id=identity_staging_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[identity-staging/identity-staging-ksa]",
@@ -339,43 +355,56 @@ identity_staging_wi = serviceaccount.IAMMember("identity-staging-workload-identi
 # Secret Manager access (per-secret IAM bindings)
 # Maps each service account to the secrets it needs access to.
 secret_access = {
-    "fitness-api-prod": (fitness_api_prod_sa, [
-        "fitness_api_prod_database_url",
-        "fitness_api_prod_google_client_id",
-        "fitness_api_prod_google_client_secret",
-        "fitness_api_prod_hevy_api_key",
-        "fitness_api_prod_strava_client_id",
-        "fitness_api_prod_strava_client_secret",
-        "fitness_api_prod_trmnl_api_key",
-    ]),
-    "fitness-api-staging": (fitness_api_staging_sa, [
-        "fitness_api_staging_database_url",
-        "fitness_api_staging_google_client_id",
-        "fitness_api_staging_google_client_secret",
-        "fitness_api_staging_hevy_api_key",
-        "fitness_api_staging_strava_client_id",
-        "fitness_api_staging_strava_client_secret",
-        "fitness_api_staging_trmnl_api_key",
-    ]),
-    "identity-prod": (identity_prod_sa, [
-        "identity_prod_database_url",
-        "identity_prod_jwt_private_key",
-        "identity_prod_resend_api_key",
-        "identity_prod_storage_access_key",
-        "identity_prod_storage_secret_key",
-        "identity_prod_storage_token",
-    ]),
-    "identity-staging": (identity_staging_sa, [
-        "identity_staging_database_url",
-        "identity_staging_jwt_private_key",
-        "identity_staging_resend_api_key",
-        "identity_staging_storage_access_key",
-        "identity_staging_storage_secret_key",
-        "identity_staging_storage_token",
-    ]),
+    "fitness-api-prod": (
+        fitness_api_prod_sa,
+        [
+            "fitness_api_prod_database_url",
+            "fitness_api_prod_google_client_id",
+            "fitness_api_prod_google_client_secret",
+            "fitness_api_prod_hevy_api_key",
+            "fitness_api_prod_strava_client_id",
+            "fitness_api_prod_strava_client_secret",
+            "fitness_api_prod_trmnl_api_key",
+        ],
+    ),
+    "fitness-api-staging": (
+        fitness_api_staging_sa,
+        [
+            "fitness_api_staging_database_url",
+            "fitness_api_staging_google_client_id",
+            "fitness_api_staging_google_client_secret",
+            "fitness_api_staging_hevy_api_key",
+            "fitness_api_staging_strava_client_id",
+            "fitness_api_staging_strava_client_secret",
+            "fitness_api_staging_trmnl_api_key",
+        ],
+    ),
+    "identity-prod": (
+        identity_prod_sa,
+        [
+            "identity_prod_database_url",
+            "identity_prod_jwt_private_key",
+            "identity_prod_resend_api_key",
+            "identity_prod_storage_access_key",
+            "identity_prod_storage_secret_key",
+            "identity_prod_storage_token",
+        ],
+    ),
+    "identity-staging": (
+        identity_staging_sa,
+        [
+            "identity_staging_database_url",
+            "identity_staging_jwt_private_key",
+            "identity_staging_resend_api_key",
+            "identity_staging_storage_access_key",
+            "identity_staging_storage_secret_key",
+            "identity_staging_storage_token",
+        ],
+    ),
 }
 # Artifact Registry access for ArgoCD Image Updater
-argocd_image_updater_ar = projects.IAMMember("argocd-image-updater-ar-access",
+argocd_image_updater_ar = projects.IAMMember(
+    "argocd-image-updater-ar-access",
     project=project,
     role="roles/artifactregistry.reader",
     member=argocd_image_updater_sa.email.apply(lambda email: f"serviceAccount:{email}"),
@@ -440,7 +469,8 @@ for env_key, (sa, secret_list) in secret_access.items():
         )
 
 # Cloud Build triggers
-fitness_api_build = cloudbuild.Trigger("fitness-api-build",
+fitness_api_build = cloudbuild.Trigger(
+    "fitness-api-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="fitness-api",
@@ -453,7 +483,8 @@ fitness_api_build = cloudbuild.Trigger("fitness-api-build",
     project=project,
     service_account=cloud_build_sa,
 )
-fitness_dashboard_build = cloudbuild.Trigger("fitness-dashboard-build",
+fitness_dashboard_build = cloudbuild.Trigger(
+    "fitness-dashboard-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="fitness-dashboard",
@@ -466,7 +497,8 @@ fitness_dashboard_build = cloudbuild.Trigger("fitness-dashboard-build",
     project=project,
     service_account=cloud_build_sa,
 )
-identity_build = cloudbuild.Trigger("identity-build",
+identity_build = cloudbuild.Trigger(
+    "identity-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="identity",
@@ -483,6 +515,9 @@ identity_build = cloudbuild.Trigger("identity-build",
 # Export cluster info
 pulumi.export("cluster_name", main_cluster.name)
 pulumi.export("cluster_endpoint", main_cluster.endpoint)
-pulumi.export("registry_url", container_registry.id.apply(
-    lambda id: f"{region}-docker.pkg.dev/{project}/containers"
-))
+pulumi.export(
+    "registry_url",
+    container_registry.id.apply(
+        lambda id: f"{region}-docker.pkg.dev/{project}/containers"
+    ),
+)

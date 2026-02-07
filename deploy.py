@@ -11,7 +11,6 @@ Examples:
 """
 
 import json
-import os
 import subprocess
 import sys
 import re
@@ -32,10 +31,17 @@ def get_deployed_images(namespace: str) -> set[str]:
     """Get all unique images currently deployed in a namespace."""
     try:
         # Get images from all pods, space-separated
-        output = run([
-            "kubectl", "get", "pods", "-n", namespace,
-            "-o", "jsonpath={.items[*].spec.containers[*].image}"
-        ])
+        output = run(
+            [
+                "kubectl",
+                "get",
+                "pods",
+                "-n",
+                namespace,
+                "-o",
+                "jsonpath={.items[*].spec.containers[*].image}",
+            ]
+        )
         if not output:
             return set()
         # Split on whitespace and return unique images
@@ -100,20 +106,20 @@ def status(app: str) -> None:
 
     # Check for mismatches within environments
     if len(staging_images) > 1:
-        print(f"\n⚠ Staging has an image mismatch (deployment in progress?)")
+        print("\n⚠ Staging has an image mismatch (deployment in progress?)")
     elif len(prod_images) > 1:
-        print(f"\n⚠ Prod has an image mismatch (deployment in progress?)")
+        print("\n⚠ Prod has an image mismatch (deployment in progress?)")
     elif staging_tag and prod_tag:
         staging_sha = extract_sha(staging_tag)
         prod_sha = extract_sha(prod_tag)
         if staging_sha and prod_sha:
             if staging_sha == prod_sha:
-                print(f"\n✓ In sync")
+                print("\n✓ In sync")
             else:
                 # Determine what the new prod tag would be
                 uses_suffix = "-staging" in staging_tag or "-prod" in prod_tag
                 new_prod_tag = f"{staging_sha}-prod" if uses_suffix else staging_sha
-                print(f"\n✗ Out of sync")
+                print("\n✗ Out of sync")
                 print(f"  To promote: uv run deploy.py promote {app}")
                 print(f"  This will deploy {new_prod_tag} to prod")
     print()
@@ -137,7 +143,7 @@ def promote(app: str) -> None:
 
     # Check for image mismatches
     if len(staging_images) > 1:
-        print(f"Error: Staging has an image mismatch (deployment in progress?)")
+        print("Error: Staging has an image mismatch (deployment in progress?)")
         print("  Images found:")
         for img in sorted(staging_images):
             print(f"    - {extract_tag(img)}")
@@ -145,7 +151,7 @@ def promote(app: str) -> None:
         sys.exit(1)
 
     if len(prod_images) > 1:
-        print(f"Warning: Prod has an image mismatch (deployment in progress?)")
+        print("Warning: Prod has an image mismatch (deployment in progress?)")
         print("  Images found:")
         for img in sorted(prod_images):
             print(f"    - {extract_tag(img)}")
@@ -155,63 +161,76 @@ def promote(app: str) -> None:
     prod_image = next(iter(prod_images))
     staging_tag = extract_tag(staging_image)
     prod_tag = extract_tag(prod_image)
-    
+
     staging_sha = extract_sha(staging_tag)
     prod_sha = extract_sha(prod_tag)
-    
+
     print(f"\n{app} promotion check:")
     print("-" * 50)
     print(f"  staging: {staging_tag}")
     print(f"  prod:    {prod_tag}")
-    
+
     if staging_sha and prod_sha and staging_sha == prod_sha:
         print(f"\n✓ Already in sync (both on {staging_sha})")
         return
-    
+
     if not staging_sha:
         print(f"\nWarning: Could not parse staging SHA from '{staging_tag}'")
         return
-    
+
     # Determine if this app uses suffixed tags
     uses_suffix = "-staging" in staging_tag or "-prod" in prod_tag
-    
+
     if uses_suffix:
         new_prod_tag = f"{staging_sha}-prod"
     else:
         new_prod_tag = staging_sha
-    
+
     image_base = f"{REGISTRY}/{app}"
     new_prod_image = f"{image_base}:{new_prod_tag}"
-    
+
     print(f"\n→ Promote prod to: {new_prod_tag}")
     response = input("\nProceed? [y/N] ").strip().lower()
-    
+
     if response != "y":
         print("Aborted.")
         return
-    
+
     # Run argocd app set
     argocd_app = f"{app}-prod"
-    patch = json.dumps({"spec": {"source": {"kustomize": {
-        "images": [f"{image_base}={new_prod_image}"],
-    }}}})
+    patch = json.dumps(
+        {
+            "spec": {
+                "source": {
+                    "kustomize": {
+                        "images": [f"{image_base}={new_prod_image}"],
+                    }
+                }
+            }
+        }
+    )
     cmd = [
-        "kubectl", "patch", "application", argocd_app,
-        "-n", "argocd",
+        "kubectl",
+        "patch",
+        "application",
+        argocd_app,
+        "-n",
+        "argocd",
         "--type=merge",
-        "-p", patch,
+        "-p",
+        patch,
     ]
 
     print(f"\nRunning: kubectl patch application {argocd_app} -n argocd")
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        print(f"\n✗ Promotion failed")
+        print("\n✗ Promotion failed")
         error_output = result.stderr or result.stdout
         if error_output:
             print(f"  {error_output.strip()}")
         sys.exit(1)
-    
+
     print(f"\n✓ Promoted {app} prod to {new_prod_tag}")
     print("  (ArgoCD will sync automatically)")
 
