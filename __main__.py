@@ -8,6 +8,8 @@ from pulumi_gcp import container, serviceaccount, projects, artifactregistry, se
 project = "ethans-services"
 region = "us-central1"
 zone = "us-central1-a"
+github_owner = "eswan18"
+cloud_build_sa = f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com"
 
 # Artifact Registry repository
 container_registry = artifactregistry.Repository(
@@ -49,7 +51,7 @@ main_cluster = container.Cluster("main-cluster",
         "state": "DECRYPTED",
     },
     default_max_pods_per_node=110,
-    location="us-central1-a",
+    location=zone,
     logging_config={
         "enable_components": [
             "SYSTEM_COMPONENTS",
@@ -84,7 +86,7 @@ main_cluster = container.Cluster("main-cluster",
         },
     },
     name="main-cluster",
-    network="projects/ethans-services/global/networks/default",
+    network=f"projects/{project}/global/networks/default",
     network_policy={
         "enabled": False,
         "provider": "PROVIDER_UNSPECIFIED",
@@ -179,7 +181,7 @@ main_cluster = container.Cluster("main-cluster",
                 },
             },
             "node_count": 1,
-            "node_locations": ["us-central1-a"],
+            "node_locations": [zone],
             "upgrade_settings": {
                 "max_surge": 1,
             },
@@ -227,7 +229,7 @@ main_cluster = container.Cluster("main-cluster",
                 },
             },
             "node_count": 1,
-            "node_locations": ["us-central1-a"],
+            "node_locations": [zone],
             "upgrade_settings": {
                 "max_surge": 1,
             },
@@ -251,7 +253,7 @@ main_cluster = container.Cluster("main-cluster",
             "enabled": False,
         },
     },
-    project="ethans-services",
+    project=project,
     protect_config={
         "workload_config": {
             "audit_mode": "BASIC",
@@ -278,9 +280,9 @@ main_cluster = container.Cluster("main-cluster",
     service_external_ips_config={
         "enabled": False,
     },
-    subnetwork="projects/ethans-services/regions/us-central1/subnetworks/default",
+    subnetwork=f"projects/{project}/regions/{region}/subnetworks/default",
     workload_identity_config={
-        "workload_pool": "ethans-services.svc.id.goog",
+        "workload_pool": f"{project}.svc.id.goog",
     },
     opts = pulumi.ResourceOptions(protect=True),
 )
@@ -289,27 +291,27 @@ main_cluster = container.Cluster("main-cluster",
 identity_staging_sa = serviceaccount.Account("identity-staging-sa",
     account_id="identity-staging-sa",
     display_name="Identity Staging Service Account",
-    project="ethans-services",
+    project=project,
 )
 identity_prod_sa = serviceaccount.Account("identity-prod-sa",
     account_id="identity-prod-sa",
     display_name="Identity Prod Service Account",
-    project="ethans-services",
+    project=project,
 )
 fitness_api_staging_sa = serviceaccount.Account("fitness-api-staging-sa",
     account_id="fitness-api-staging-sa",
     display_name="Fitness API Staging",
-    project="ethans-services",
+    project=project,
 )
 fitness_api_prod_sa = serviceaccount.Account("fitness-api-prod-sa",
     account_id="fitness-api-prod-sa",
     display_name="Fitness API Prod",
-    project="ethans-services",
+    project=project,
 )
 argocd_image_updater_sa = serviceaccount.Account("argocd-image-updater-sa",
     account_id="argocd-image-updater-sa",
     display_name="ArgoCD Image Updater",
-    project="ethans-services",
+    project=project,
 )
 
 # Workload Identity bindings
@@ -404,40 +406,40 @@ fitness_api_build = cloudbuild.Trigger("fitness-api-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="fitness-api",
-        owner="eswan18",
+        owner=github_owner,
         push=cloudbuild.TriggerGithubPushArgs(
             branch="^main$",
         ),
     ),
     name="fitness-api-build",
     project=project,
-    service_account=f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com",
+    service_account=cloud_build_sa,
 )
 fitness_dashboard_build = cloudbuild.Trigger("fitness-dashboard-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="fitness-dashboard",
-        owner="eswan18",
+        owner=github_owner,
         push=cloudbuild.TriggerGithubPushArgs(
             branch="^main$",
         ),
     ),
     name="fitness-dashboard-build",
     project=project,
-    service_account=f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com",
+    service_account=cloud_build_sa,
 )
 identity_build = cloudbuild.Trigger("identity-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="identity",
-        owner="eswan18",
+        owner=github_owner,
         push=cloudbuild.TriggerGithubPushArgs(
             branch="^main$",
         ),
     ),
     name="identity-build",
     project=project,
-    service_account=f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com",
+    service_account=cloud_build_sa,
 )
 
 # Export cluster info

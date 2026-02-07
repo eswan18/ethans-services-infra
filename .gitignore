@@ -1,2 +1,6 @@
 *.pyc
+__pycache__/
 venv/
+.venv/
+.DS_Store
+Pulumi.*.secrets.yaml
