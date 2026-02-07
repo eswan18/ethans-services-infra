@@ -419,6 +419,19 @@ fitness_api_build = cloudbuild.Trigger("fitness-api-build",
     service_account=f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com",
     opts=pulumi.ResourceOptions(protect=True),
 )
+fitness_dashboard_build = cloudbuild.Trigger("fitness-dashboard-build",
+    filename="cloudbuild.yaml",
+    github=cloudbuild.TriggerGithubArgs(
+        name="fitness-dashboard",
+        owner="eswan18",
+        push=cloudbuild.TriggerGithubPushArgs(
+            branch="^main$",
+        ),
+    ),
+    name="fitness-dashboard-build",
+    project=project,
+    service_account=f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com",
+)
 identity_build = cloudbuild.Trigger("identity-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
