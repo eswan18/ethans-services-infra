@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "ethans-services-infra"
@@ -14,8 +14,8 @@ dependencies = [
 [project.scripts]
 deploy = "deploy:main"
 
-[tool.setuptools]
-py-modules = ["deploy"]
+[tool.hatch.build.targets.wheel]
+packages = ["."]
 
 [dependency-groups]
 dev = [
