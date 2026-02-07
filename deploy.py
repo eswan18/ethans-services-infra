@@ -10,6 +10,7 @@ Examples:
     uv run deploy.py promote fitness-dashboard
 """
 
+import json
 import subprocess
 import sys
 import re
@@ -196,10 +197,19 @@ def promote(app: str) -> None:
     ]
     
     print(f"\nRunning: {' '.join(cmd)}")
-    result = subprocess.run(cmd)
-    
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
     if result.returncode != 0:
-        print(f"\n✗ Promotion failed (exit code {result.returncode})")
+        print(f"\n✗ Promotion failed")
+        # Try to parse argocd's JSON error format
+        error_output = result.stderr or result.stdout
+        if error_output:
+            for line in error_output.strip().split("\n"):
+                try:
+                    err = json.loads(line)
+                    print(f"  {err.get('msg', line)}")
+                except json.JSONDecodeError:
+                    print(f"  {line}")
         sys.exit(1)
     
     print(f"\n✓ Promoted {app} prod to {new_prod_tag}")
