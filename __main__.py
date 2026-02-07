@@ -336,18 +336,44 @@ identity_staging_wi = serviceaccount.IAMMember("identity-staging-workload-identi
     member=f"serviceAccount:{project}.svc.id.goog[identity-staging/identity-staging-ksa]",
 )
 
-# Secret Manager access
-fitness_api_prod_secrets = projects.IAMMember("fitness-api-prod-secret-access",
-    project=project,
-    role="roles/secretmanager.secretAccessor",
-    member=fitness_api_prod_sa.email.apply(lambda email: f"serviceAccount:{email}"),
-)
-fitness_api_staging_secrets = projects.IAMMember("fitness-api-staging-secret-access",
-    project=project,
-    role="roles/secretmanager.secretAccessor",
-    member=fitness_api_staging_sa.email.apply(lambda email: f"serviceAccount:{email}"),
-)
-
+# Secret Manager access (per-secret IAM bindings)
+# Maps each service account to the secrets it needs access to.
+secret_access = {
+    "fitness-api-prod": (fitness_api_prod_sa, [
+        "fitness_api_prod_database_url",
+        "fitness_api_prod_google_client_id",
+        "fitness_api_prod_google_client_secret",
+        "fitness_api_prod_hevy_api_key",
+        "fitness_api_prod_strava_client_id",
+        "fitness_api_prod_strava_client_secret",
+        "fitness_api_prod_trmnl_api_key",
+    ]),
+    "fitness-api-staging": (fitness_api_staging_sa, [
+        "fitness_api_staging_database_url",
+        "fitness_api_staging_google_client_id",
+        "fitness_api_staging_google_client_secret",
+        "fitness_api_staging_hevy_api_key",
+        "fitness_api_staging_strava_client_id",
+        "fitness_api_staging_strava_client_secret",
+        "fitness_api_staging_trmnl_api_key",
+    ]),
+    "identity-prod": (identity_prod_sa, [
+        "identity_prod_database_url",
+        "identity_prod_jwt_private_key",
+        "identity_prod_resend_api_key",
+        "identity_prod_storage_access_key",
+        "identity_prod_storage_secret_key",
+        "identity_prod_storage_token",
+    ]),
+    "identity-staging": (identity_staging_sa, [
+        "identity_staging_database_url",
+        "identity_staging_jwt_private_key",
+        "identity_staging_resend_api_key",
+        "identity_staging_storage_access_key",
+        "identity_staging_storage_secret_key",
+        "identity_staging_storage_token",
+    ]),
+}
 # Artifact Registry access for ArgoCD Image Updater
 argocd_image_updater_ar = projects.IAMMember("argocd-image-updater-ar-access",
     project=project,
@@ -381,7 +407,6 @@ secret_names = [
     "identity_prod_storage_secret_key",
     "identity_prod_storage_token",
     # identity staging
-    "identity_staging_admin_database_url",
     "identity_staging_database_url",
     "identity_staging_jwt_private_key",
     "identity_staging_resend_api_key",
@@ -400,6 +425,19 @@ for name in secret_names:
         ),
         opts=pulumi.ResourceOptions(protect=True),
     )
+
+# Per-secret IAM bindings (grant each SA access only to its own secrets)
+secret_iam_bindings = {}
+for env_key, (sa, secret_list) in secret_access.items():
+    for secret_name in secret_list:
+        resource_name = f"{env_key}-access-{secret_name}"
+        secret_iam_bindings[resource_name] = secretmanager.SecretIamMember(
+            resource_name,
+            project=project,
+            secret_id=secrets[secret_name].secret_id,
+            role="roles/secretmanager.secretAccessor",
+            member=sa.email.apply(lambda email: f"serviceAccount:{email}"),
+        )
 
 # Cloud Build triggers
 fitness_api_build = cloudbuild.Trigger("fitness-api-build",
