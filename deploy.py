@@ -192,26 +192,24 @@ def promote(app: str) -> None:
     
     # Run argocd app set
     argocd_app = f"{app}-prod"
+    patch = json.dumps({"spec": {"source": {"kustomize": {
+        "images": [f"{image_base}={new_prod_image}"],
+    }}}})
     cmd = [
-        "argocd", "app", "set", argocd_app,
-        "--kustomize-image", f"{image_base}={new_prod_image}",
+        "kubectl", "patch", "application", argocd_app,
+        "-n", "argocd",
+        "--type=merge",
+        "-p", patch,
     ]
 
-    print(f"\nRunning: {' '.join(cmd)}")
-    env = {**os.environ, "ARGOCD_NAMESPACE": "argocd"}
-    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    print(f"\nRunning: kubectl patch application {argocd_app} -n argocd")
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
         print(f"\n✗ Promotion failed")
-        # Try to parse argocd's JSON error format
         error_output = result.stderr or result.stdout
         if error_output:
-            for line in error_output.strip().split("\n"):
-                try:
-                    err = json.loads(line)
-                    print(f"  {err.get('msg', line)}")
-                except json.JSONDecodeError:
-                    print(f"  {line}")
+            print(f"  {error_output.strip()}")
         sys.exit(1)
     
     print(f"\n✓ Promoted {app} prod to {new_prod_tag}")
