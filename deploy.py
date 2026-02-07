@@ -193,6 +193,7 @@ def promote(app: str) -> None:
     argocd_app = f"{app}-prod"
     cmd = [
         "argocd", "app", "set", argocd_app,
+        "-n", "argocd",
         "--kustomize-image", f"{image_base}={new_prod_image}",
     ]
     
