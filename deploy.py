@@ -11,7 +11,6 @@ Examples:
 """
 
 import json
-import os
 import subprocess
 import sys
 import re
@@ -100,20 +99,20 @@ def status(app: str) -> None:
 
     # Check for mismatches within environments
     if len(staging_images) > 1:
-        print(f"\n⚠ Staging has an image mismatch (deployment in progress?)")
+        print("\n⚠ Staging has an image mismatch (deployment in progress?)")
     elif len(prod_images) > 1:
-        print(f"\n⚠ Prod has an image mismatch (deployment in progress?)")
+        print("\n⚠ Prod has an image mismatch (deployment in progress?)")
     elif staging_tag and prod_tag:
         staging_sha = extract_sha(staging_tag)
         prod_sha = extract_sha(prod_tag)
         if staging_sha and prod_sha:
             if staging_sha == prod_sha:
-                print(f"\n✓ In sync")
+                print("\n✓ In sync")
             else:
                 # Determine what the new prod tag would be
                 uses_suffix = "-staging" in staging_tag or "-prod" in prod_tag
                 new_prod_tag = f"{staging_sha}-prod" if uses_suffix else staging_sha
-                print(f"\n✗ Out of sync")
+                print("\n✗ Out of sync")
                 print(f"  To promote: uv run deploy.py promote {app}")
                 print(f"  This will deploy {new_prod_tag} to prod")
     print()
@@ -137,7 +136,7 @@ def promote(app: str) -> None:
 
     # Check for image mismatches
     if len(staging_images) > 1:
-        print(f"Error: Staging has an image mismatch (deployment in progress?)")
+        print("Error: Staging has an image mismatch (deployment in progress?)")
         print("  Images found:")
         for img in sorted(staging_images):
             print(f"    - {extract_tag(img)}")
@@ -145,7 +144,7 @@ def promote(app: str) -> None:
         sys.exit(1)
 
     if len(prod_images) > 1:
-        print(f"Warning: Prod has an image mismatch (deployment in progress?)")
+        print("Warning: Prod has an image mismatch (deployment in progress?)")
         print("  Images found:")
         for img in sorted(prod_images):
             print(f"    - {extract_tag(img)}")
@@ -206,7 +205,7 @@ def promote(app: str) -> None:
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        print(f"\n✗ Promotion failed")
+        print("\n✗ Promotion failed")
         error_output = result.stderr or result.stdout
         if error_output:
             print(f"  {error_output.strip()}")

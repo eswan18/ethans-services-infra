@@ -1,7 +1,6 @@
 """Infrastructure for Ethan's Services in GCP"""
 
 import pulumi
-from pulumi import ResourceOptions
 from pulumi_gcp import container, serviceaccount, projects, artifactregistry, secretmanager, cloudbuild
 
 # Configuration

@@ -16,3 +16,8 @@ deploy = "deploy:main"
 
 [tool.setuptools]
 py-modules = ["deploy"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.0",
+]
