@@ -11,6 +11,7 @@ Examples:
 """
 
 import json
+import os
 import subprocess
 import sys
 import re
@@ -193,12 +194,12 @@ def promote(app: str) -> None:
     argocd_app = f"{app}-prod"
     cmd = [
         "argocd", "app", "set", argocd_app,
-        "-n", "argocd",
         "--kustomize-image", f"{image_base}={new_prod_image}",
     ]
-    
+
     print(f"\nRunning: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    env = {**os.environ, "ARGOCD_NAMESPACE": "argocd"}
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
     if result.returncode != 0:
         print(f"\n✗ Promotion failed")
