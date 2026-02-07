@@ -20,4 +20,10 @@ py-modules = ["deploy"]
 [dependency-groups]
 dev = [
     "ruff>=0.15.0",
+    "ty>=0.0.15",
 ]
+
+[tool.ty.src]
+# Exclude Pulumi entrypoint — Pulumi's type stubs produce false positives
+# with TypedDict inputs and Output.apply() lambdas.
+exclude = ["__main__.py"]
