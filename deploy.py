@@ -31,10 +31,17 @@ def get_deployed_images(namespace: str) -> set[str]:
     """Get all unique images currently deployed in a namespace."""
     try:
         # Get images from all pods, space-separated
-        output = run([
-            "kubectl", "get", "pods", "-n", namespace,
-            "-o", "jsonpath={.items[*].spec.containers[*].image}"
-        ])
+        output = run(
+            [
+                "kubectl",
+                "get",
+                "pods",
+                "-n",
+                namespace,
+                "-o",
+                "jsonpath={.items[*].spec.containers[*].image}",
+            ]
+        )
         if not output:
             return set()
         # Split on whitespace and return unique images
@@ -154,51 +161,64 @@ def promote(app: str) -> None:
     prod_image = next(iter(prod_images))
     staging_tag = extract_tag(staging_image)
     prod_tag = extract_tag(prod_image)
-    
+
     staging_sha = extract_sha(staging_tag)
     prod_sha = extract_sha(prod_tag)
-    
+
     print(f"\n{app} promotion check:")
     print("-" * 50)
     print(f"  staging: {staging_tag}")
     print(f"  prod:    {prod_tag}")
-    
+
     if staging_sha and prod_sha and staging_sha == prod_sha:
         print(f"\n✓ Already in sync (both on {staging_sha})")
         return
-    
+
     if not staging_sha:
         print(f"\nWarning: Could not parse staging SHA from '{staging_tag}'")
         return
-    
+
     # Determine if this app uses suffixed tags
     uses_suffix = "-staging" in staging_tag or "-prod" in prod_tag
-    
+
     if uses_suffix:
         new_prod_tag = f"{staging_sha}-prod"
     else:
         new_prod_tag = staging_sha
-    
+
     image_base = f"{REGISTRY}/{app}"
     new_prod_image = f"{image_base}:{new_prod_tag}"
-    
+
     print(f"\n→ Promote prod to: {new_prod_tag}")
     response = input("\nProceed? [y/N] ").strip().lower()
-    
+
     if response != "y":
         print("Aborted.")
         return
-    
+
     # Run argocd app set
     argocd_app = f"{app}-prod"
-    patch = json.dumps({"spec": {"source": {"kustomize": {
-        "images": [f"{image_base}={new_prod_image}"],
-    }}}})
+    patch = json.dumps(
+        {
+            "spec": {
+                "source": {
+                    "kustomize": {
+                        "images": [f"{image_base}={new_prod_image}"],
+                    }
+                }
+            }
+        }
+    )
     cmd = [
-        "kubectl", "patch", "application", argocd_app,
-        "-n", "argocd",
+        "kubectl",
+        "patch",
+        "application",
+        argocd_app,
+        "-n",
+        "argocd",
         "--type=merge",
-        "-p", patch,
+        "-p",
+        patch,
     ]
 
     print(f"\nRunning: kubectl patch application {argocd_app} -n argocd")
@@ -210,7 +230,7 @@ def promote(app: str) -> None:
         if error_output:
             print(f"  {error_output.strip()}")
         sys.exit(1)
-    
+
     print(f"\n✓ Promoted {app} prod to {new_prod_tag}")
     print("  (ArgoCD will sync automatically)")
 
