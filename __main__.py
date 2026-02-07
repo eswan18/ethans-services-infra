@@ -319,6 +319,18 @@ fitness_api_prod_sa = serviceaccount.Account(
     display_name="Fitness API Prod",
     project=project,
 )
+asset_manager_staging_sa = serviceaccount.Account(
+    "asset-manager-staging-sa",
+    account_id="asset-manager-staging-sa",
+    display_name="Asset Manager Staging Service Account",
+    project=project,
+)
+asset_manager_prod_sa = serviceaccount.Account(
+    "asset-manager-prod-sa",
+    account_id="asset-manager-prod-sa",
+    display_name="Asset Manager Prod Service Account",
+    project=project,
+)
 argocd_image_updater_sa = serviceaccount.Account(
     "argocd-image-updater-sa",
     account_id="argocd-image-updater-sa",
@@ -350,6 +362,18 @@ identity_staging_wi = serviceaccount.IAMMember(
     service_account_id=identity_staging_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[identity-staging/identity-staging-ksa]",
+)
+asset_manager_prod_wi = serviceaccount.IAMMember(
+    "asset-manager-prod-workload-identity",
+    service_account_id=asset_manager_prod_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[asset-manager-prod/asset-manager-prod-ksa]",
+)
+asset_manager_staging_wi = serviceaccount.IAMMember(
+    "asset-manager-staging-workload-identity",
+    service_account_id=asset_manager_staging_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[asset-manager-staging/asset-manager-staging-ksa]",
 )
 
 # Secret Manager access (per-secret IAM bindings)
@@ -401,6 +425,24 @@ secret_access = {
             "identity_staging_storage_token",
         ],
     ),
+    "asset-manager-prod": (
+        asset_manager_prod_sa,
+        [
+            "asset_manager_prod_database_url",
+            "asset_manager_prod_client_id",
+            "asset_manager_prod_client_secret",
+            "asset_manager_prod_secret_key",
+        ],
+    ),
+    "asset-manager-staging": (
+        asset_manager_staging_sa,
+        [
+            "asset_manager_staging_database_url",
+            "asset_manager_staging_client_id",
+            "asset_manager_staging_client_secret",
+            "asset_manager_staging_secret_key",
+        ],
+    ),
 }
 # Artifact Registry access for ArgoCD Image Updater
 argocd_image_updater_ar = projects.IAMMember(
@@ -442,6 +484,16 @@ secret_names = [
     "identity_staging_storage_access_key",
     "identity_staging_storage_secret_key",
     "identity_staging_storage_token",
+    # asset-manager prod
+    "asset_manager_prod_database_url",
+    "asset_manager_prod_client_id",
+    "asset_manager_prod_client_secret",
+    "asset_manager_prod_secret_key",
+    # asset-manager staging
+    "asset_manager_staging_database_url",
+    "asset_manager_staging_client_id",
+    "asset_manager_staging_client_secret",
+    "asset_manager_staging_secret_key",
 ]
 secrets = {}
 for name in secret_names:
@@ -508,6 +560,20 @@ identity_build = cloudbuild.Trigger(
         ),
     ),
     name="identity-build",
+    project=project,
+    service_account=cloud_build_sa,
+)
+asset_manager_build = cloudbuild.Trigger(
+    "asset-manager-build",
+    filename="cloudbuild.yaml",
+    github=cloudbuild.TriggerGithubArgs(
+        name="asset_manager",
+        owner=github_owner,
+        push=cloudbuild.TriggerGithubPushArgs(
+            branch="^main$",
+        ),
+    ),
+    name="asset-manager-build",
     project=project,
     service_account=cloud_build_sa,
 )
