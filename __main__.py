@@ -331,6 +331,18 @@ asset_manager_prod_sa = serviceaccount.Account(
     display_name="Asset Manager Prod Service Account",
     project=project,
 )
+forecasting_staging_sa = serviceaccount.Account(
+    "forecasting-staging-sa",
+    account_id="forecasting-staging-sa",
+    display_name="Forecasting Staging Service Account",
+    project=project,
+)
+forecasting_prod_sa = serviceaccount.Account(
+    "forecasting-prod-sa",
+    account_id="forecasting-prod-sa",
+    display_name="Forecasting Prod Service Account",
+    project=project,
+)
 argocd_image_updater_sa = serviceaccount.Account(
     "argocd-image-updater-sa",
     account_id="argocd-image-updater-sa",
@@ -374,6 +386,18 @@ asset_manager_staging_wi = serviceaccount.IAMMember(
     service_account_id=asset_manager_staging_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[asset-manager-staging/asset-manager-staging-ksa]",
+)
+forecasting_prod_wi = serviceaccount.IAMMember(
+    "forecasting-prod-workload-identity",
+    service_account_id=forecasting_prod_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[forecasting-prod/forecasting-prod-ksa]",
+)
+forecasting_staging_wi = serviceaccount.IAMMember(
+    "forecasting-staging-workload-identity",
+    service_account_id=forecasting_staging_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[forecasting-staging/forecasting-staging-ksa]",
 )
 
 # Secret Manager access (per-secret IAM bindings)
@@ -443,6 +467,30 @@ secret_access = {
             "asset_manager_staging_secret_key",
         ],
     ),
+    "forecasting-prod": (
+        forecasting_prod_sa,
+        [
+            "forecasting_prod_database_url",
+            "forecasting_prod_jwt_secret",
+            "forecasting_prod_argon2_salt",
+            "forecasting_prod_idp_client_id",
+            "forecasting_prod_idp_client_secret",
+            "forecasting_prod_idp_admin_client_id",
+            "forecasting_prod_idp_admin_client_secret",
+        ],
+    ),
+    "forecasting-staging": (
+        forecasting_staging_sa,
+        [
+            "forecasting_staging_database_url",
+            "forecasting_staging_jwt_secret",
+            "forecasting_staging_argon2_salt",
+            "forecasting_staging_idp_client_id",
+            "forecasting_staging_idp_client_secret",
+            "forecasting_staging_idp_admin_client_id",
+            "forecasting_staging_idp_admin_client_secret",
+        ],
+    ),
 }
 # Artifact Registry access for ArgoCD Image Updater
 argocd_image_updater_ar = projects.IAMMember(
@@ -494,6 +542,22 @@ secret_names = [
     "asset_manager_staging_client_id",
     "asset_manager_staging_client_secret",
     "asset_manager_staging_secret_key",
+    # forecasting prod
+    "forecasting_prod_database_url",
+    "forecasting_prod_jwt_secret",
+    "forecasting_prod_argon2_salt",
+    "forecasting_prod_idp_client_id",
+    "forecasting_prod_idp_client_secret",
+    "forecasting_prod_idp_admin_client_id",
+    "forecasting_prod_idp_admin_client_secret",
+    # forecasting staging
+    "forecasting_staging_database_url",
+    "forecasting_staging_jwt_secret",
+    "forecasting_staging_argon2_salt",
+    "forecasting_staging_idp_client_id",
+    "forecasting_staging_idp_client_secret",
+    "forecasting_staging_idp_admin_client_id",
+    "forecasting_staging_idp_admin_client_secret",
 ]
 secrets = {}
 for name in secret_names:
@@ -574,6 +638,20 @@ asset_manager_build = cloudbuild.Trigger(
         ),
     ),
     name="asset-manager-build",
+    project=project,
+    service_account=cloud_build_sa,
+)
+forecasting_build = cloudbuild.Trigger(
+    "forecasting-build",
+    filename="cloudbuild.yaml",
+    github=cloudbuild.TriggerGithubArgs(
+        name="forecasting",
+        owner=github_owner,
+        push=cloudbuild.TriggerGithubPushArgs(
+            branch="^main$",
+        ),
+    ),
+    name="forecasting-build",
     project=project,
     service_account=cloud_build_sa,
 )
