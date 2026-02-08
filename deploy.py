@@ -2,12 +2,12 @@
 Deployment status and promotion helper for GKE services.
 
 Usage:
-    uv run deploy.py status <app>     # Show current images for staging and prod
-    uv run deploy.py promote <app>    # Compare staging vs prod, offer to promote
+    uv run deploy status <app>     # Show current images for staging and prod
+    uv run deploy promote <app>    # Compare staging vs prod, offer to promote
 
 Examples:
-    uv run deploy.py status fitness-api
-    uv run deploy.py promote fitness-dashboard
+    uv run deploy status fitness-api
+    uv run deploy promote fitness-dashboard
 """
 
 import json
