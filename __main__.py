@@ -558,6 +558,8 @@ secret_names = [
     "forecasting_staging_idp_client_secret",
     "forecasting_staging_idp_admin_client_id",
     "forecasting_staging_idp_admin_client_secret",
+    # forecasting build (used by Cloud Build, not the app)
+    "forecasting_sentry_auth_token",
 ]
 secrets = {}
 for name in secret_names:
@@ -583,6 +585,16 @@ for env_key, (sa, secret_list) in secret_access.items():
             role="roles/secretmanager.secretAccessor",
             member=sa.email.apply(lambda email: f"serviceAccount:{email}"),
         )
+
+# Cloud Build SA access to build-time secrets
+cloud_build_sa_email = "754418346661-compute@developer.gserviceaccount.com"
+cloud_build_sentry_access = secretmanager.SecretIamMember(
+    "cloud-build-access-forecasting_sentry_auth_token",
+    project=project,
+    secret_id=secrets["forecasting_sentry_auth_token"].secret_id,
+    role="roles/secretmanager.secretAccessor",
+    member=f"serviceAccount:{cloud_build_sa_email}",
+)
 
 # Cloud Build triggers
 fitness_api_build = cloudbuild.Trigger(
