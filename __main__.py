@@ -475,8 +475,6 @@ secret_access = {
             "forecasting_prod_argon2_salt",
             "forecasting_prod_idp_client_id",
             "forecasting_prod_idp_client_secret",
-            "forecasting_prod_idp_admin_client_id",
-            "forecasting_prod_idp_admin_client_secret",
         ],
     ),
     "forecasting-staging": (
@@ -487,8 +485,6 @@ secret_access = {
             "forecasting_staging_argon2_salt",
             "forecasting_staging_idp_client_id",
             "forecasting_staging_idp_client_secret",
-            "forecasting_staging_idp_admin_client_id",
-            "forecasting_staging_idp_admin_client_secret",
         ],
     ),
 }
@@ -548,16 +544,12 @@ secret_names = [
     "forecasting_prod_argon2_salt",
     "forecasting_prod_idp_client_id",
     "forecasting_prod_idp_client_secret",
-    "forecasting_prod_idp_admin_client_id",
-    "forecasting_prod_idp_admin_client_secret",
     # forecasting staging
     "forecasting_staging_database_url",
     "forecasting_staging_jwt_secret",
     "forecasting_staging_argon2_salt",
     "forecasting_staging_idp_client_id",
     "forecasting_staging_idp_client_secret",
-    "forecasting_staging_idp_admin_client_id",
-    "forecasting_staging_idp_admin_client_secret",
     # forecasting build (used by Cloud Build, not the app)
     "forecasting_sentry_auth_token",
 ]
