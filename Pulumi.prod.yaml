@@ -1,2 +1,6 @@
 config:
   gcp:project: ethans-services
+  ethans-services-infra:tailscale-oauth-client-id:
+    secure: AAABAFlZnQ9Y9/+5bjGbQOWDloxG3IiTyKFImTcJWwOI3+am37PIOIzN3rGDMFEpNQ==
+  ethans-services-infra:tailscale-oauth-client-secret:
+    secure: AAABAE03VpiACl4wiHHD1t3NXoKRHx2mZmm74XoCknm18K8Vcv7rAErzVbYcOHUbz+dxNxnxcwOUTMCLpHuNAysFVXoqikkswET/9rzRahUdhzU2T1O0E40uP0Z5hqH8
