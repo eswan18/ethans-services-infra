@@ -9,8 +9,10 @@ from pulumi_gcp import (
     secretmanager,
     cloudbuild,
 )
+import pulumi_kubernetes as k8s
 
 # Configuration
+config = pulumi.Config()
 project = "ethans-services"
 region = "us-central1"
 zone = "us-central1-a"
@@ -77,16 +79,8 @@ main_cluster = container.Cluster(
         },
         "enable_components": [
             "SYSTEM_COMPONENTS",
-            "STORAGE",
-            "HPA",
-            "POD",
-            "DAEMONSET",
-            "DEPLOYMENT",
-            "STATEFULSET",
-            "JOBSET",
             "CADVISOR",
             "KUBELET",
-            "DCGM",
         ],
         "managed_prometheus": {
             "enabled": True,
@@ -192,7 +186,7 @@ main_cluster = container.Cluster(
             "upgrade_settings": {
                 "max_surge": 1,
             },
-            "version": "1.33.5-gke.2118001",
+            "version": "1.33.5-gke.2172001",
         },
         {
             "initial_node_count": 1,
@@ -240,10 +234,10 @@ main_cluster = container.Cluster(
             "upgrade_settings": {
                 "max_surge": 1,
             },
-            "version": "1.33.5-gke.2118001",
+            "version": "1.33.5-gke.2172001",
         },
     ],
-    node_version="1.33.5-gke.2118001",
+    node_version="1.33.5-gke.2172001",
     notification_config={
         "pubsub": {
             "enabled": False,
@@ -292,6 +286,13 @@ main_cluster = container.Cluster(
         "workload_pool": f"{project}.svc.id.goog",
     },
     opts=pulumi.ResourceOptions(protect=True),
+)
+
+
+# K8s Provider (uses existing kubeconfig context)
+k8s_provider = k8s.Provider(
+    "gke-k8s",
+    context="gke_ethans-services_us-central1-a_main-cluster",
 )
 
 # Service Accounts
@@ -658,6 +659,104 @@ forecasting_build = cloudbuild.Trigger(
     name="forecasting-build",
     project=project,
     service_account=cloud_build_sa,
+)
+
+# ArgoCD (Helm)
+argocd_release = k8s.helm.v3.Release(
+    "argocd",
+    chart="argo-cd",
+    version="9.3.7",
+    namespace="argocd",
+    repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+        repo="https://argoproj.github.io/argo-helm",
+    ),
+    values={
+        "server": {
+            "resources": {
+                "requests": {"cpu": "5m", "memory": "64Mi"},
+            },
+        },
+        "controller": {
+            "resources": {
+                "requests": {"cpu": "5m", "memory": "64Mi"},
+            },
+        },
+        "repoServer": {
+            "resources": {
+                "requests": {"cpu": "100m", "memory": "256Mi"},
+                "limits": {"cpu": "500m", "memory": "512Mi"},
+            },
+            "livenessProbe": {
+                "timeoutSeconds": 5,
+                "failureThreshold": 5,
+            },
+            "readinessProbe": {
+                "timeoutSeconds": 5,
+                "failureThreshold": 5,
+            },
+        },
+        "redis": {
+            "resources": {
+                "requests": {"cpu": "5m", "memory": "32Mi"},
+            },
+        },
+        "dex": {"enabled": False},
+        "notifications": {"enabled": False},
+        "applicationSet": {"enabled": False},
+    },
+    opts=pulumi.ResourceOptions(provider=k8s_provider),
+)
+
+argocd_image_updater_release = k8s.helm.v3.Release(
+    "argocd-image-updater",
+    chart="argocd-image-updater",
+    version="1.0.5",
+    namespace="argocd",
+    repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+        repo="https://argoproj.github.io/argo-helm",
+    ),
+    values={
+        "resources": {
+            "requests": {"cpu": "5m", "memory": "32Mi"},
+        },
+    },
+    opts=pulumi.ResourceOptions(provider=k8s_provider),
+)
+
+# Secrets Store CSI Driver (Helm)
+csi_secrets_store_release = k8s.helm.v3.Release(
+    "csi-secrets-store",
+    chart="secrets-store-csi-driver",
+    version="1.5.5",
+    namespace="kube-system",
+    repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+        repo="https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts",
+    ),
+    values={
+        "syncSecret": {"enabled": True},
+    },
+    opts=pulumi.ResourceOptions(provider=k8s_provider),
+)
+
+# Tailscale Operator (Helm)
+tailscale_operator_release = k8s.helm.v3.Release(
+    "tailscale-operator",
+    chart="tailscale-operator",
+    version="1.94.1",
+    namespace="tailscale",
+    repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+        repo="https://pkgs.tailscale.com/helmcharts",
+    ),
+    values={
+        "oauth": {
+            "clientId": config.require_secret("tailscale-oauth-client-id"),
+            "clientSecret": config.require_secret("tailscale-oauth-client-secret"),
+        },
+        "operatorConfig": {
+            "defaultTags": ["tag:k8s-operator", "tag:k8s"],
+        },
+    },
+    opts=pulumi.ResourceOptions(provider=k8s_provider),
 )
 
 # Export cluster info
