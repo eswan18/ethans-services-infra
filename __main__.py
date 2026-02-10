@@ -665,7 +665,7 @@ forecasting_build = cloudbuild.Trigger(
 argocd_release = k8s.helm.v3.Release(
     "argocd",
     chart="argo-cd",
-    version="9.3.7",
+    version="9.4.1",
     namespace="argocd",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://argoproj.github.io/argo-helm",
