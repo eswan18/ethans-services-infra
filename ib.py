@@ -2,13 +2,16 @@
 Deployment status and promotion helper for GKE services.
 
 Usage:
-    ib status <app>     # Show current images for staging and prod
-    ib status --all     # Show status for all services
-    ib promote <app>    # Compare staging vs prod, offer to promote
+    ib status <app>         # Show current images for staging and prod
+    ib status --all         # Show status for all services
+    ib status <app> -q      # Exit 0 if in sync, 1 if not (minimal output)
+    ib status --all -q      # List only out-of-sync services
+    ib promote <app>        # Compare staging vs prod, offer to promote
 
 Examples:
     ib status fitness-api
     ib status --all
+    ib status --all -q
     ib promote fitness-dashboard
 """
 
@@ -80,10 +83,31 @@ def extract_sha(tag: str) -> str | None:
     return None
 
 
-def status(app: str) -> None:
-    """Show current deployment status for an app."""
+def status(app: str, quiet: bool = False) -> bool | None:
+    """Show current deployment status for an app.
+
+    Returns True if in sync, False if out of sync, None if indeterminate.
+    """
     staging_images = get_deployed_images(f"{app}-staging")
     prod_images = get_deployed_images(f"{app}-prod")
+
+    if quiet:
+        # Indeterminate cases
+        if not staging_images or not prod_images:
+            print(f"{app}: unknown", file=sys.stderr)
+            return None
+        if len(staging_images) > 1 or len(prod_images) > 1:
+            print(f"{app}: unknown", file=sys.stderr)
+            return None
+        staging_sha = extract_sha(extract_tag(next(iter(staging_images))))
+        prod_sha = extract_sha(extract_tag(next(iter(prod_images))))
+        if not staging_sha or not prod_sha:
+            print(f"{app}: unknown", file=sys.stderr)
+            return None
+        if staging_sha == prod_sha:
+            return True
+        print(app)
+        return False
 
     print(f"\n{app} deployment status:")
     print("-" * 50)
@@ -117,14 +141,17 @@ def status(app: str) -> None:
     # Check for mismatches within environments
     if len(staging_images) > 1:
         print("\n⚠ Staging has an image mismatch (deployment in progress?)")
+        return None
     elif len(prod_images) > 1:
         print("\n⚠ Prod has an image mismatch (deployment in progress?)")
+        return None
     elif staging_tag and prod_tag:
         staging_sha = extract_sha(staging_tag)
         prod_sha = extract_sha(prod_tag)
         if staging_sha and prod_sha:
             if staging_sha == prod_sha:
                 print("\n✓ In sync")
+                return True
             else:
                 # Determine what the new prod tag would be
                 uses_suffix = "-staging" in staging_tag or "-prod" in prod_tag
@@ -132,7 +159,9 @@ def status(app: str) -> None:
                 print("\n✗ Out of sync")
                 print(f"  To promote: ib promote {app}")
                 print(f"  This will deploy {new_prod_tag} to prod")
+                return False
     print()
+    return None
 
 
 def promote(app: str) -> None:
@@ -261,12 +290,25 @@ def main() -> None:
     command = sys.argv[1]
 
     if command == "status":
-        if len(sys.argv) >= 3 and sys.argv[2] == "--all":
-            for app in SERVICES:
-                status(app)
-        elif len(sys.argv) >= 3:
-            validate_app(sys.argv[2])
-            status(sys.argv[2])
+        args = sys.argv[2:]
+        quiet = "-q" in args or "--quiet" in args
+        args = [a for a in args if a not in ("-q", "--quiet")]
+        all_mode = "--all" in args
+        args = [a for a in args if a != "--all"]
+
+        if all_mode:
+            results = [status(app, quiet=quiet) for app in SERVICES]
+            if any(r is False for r in results):
+                sys.exit(1)
+            elif any(r is None for r in results):
+                sys.exit(2)
+        elif args:
+            validate_app(args[0])
+            result = status(args[0], quiet=quiet)
+            if result is False:
+                sys.exit(1)
+            elif result is None:
+                sys.exit(2)
         else:
             print("Usage: ib status <app> | ib status --all")
             sys.exit(1)
