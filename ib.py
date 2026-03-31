@@ -3,10 +3,12 @@ Deployment status and promotion helper for GKE services.
 
 Usage:
     ib status <app>     # Show current images for staging and prod
+    ib status --all     # Show status for all services
     ib promote <app>    # Compare staging vs prod, offer to promote
 
 Examples:
     ib status fitness-api
+    ib status --all
     ib promote fitness-dashboard
 """
 
@@ -16,6 +18,14 @@ import sys
 import re
 
 REGISTRY = "us-central1-docker.pkg.dev/ethans-services/containers"
+
+SERVICES = [
+    "asset-manager",
+    "fitness-api",
+    "fitness-dashboard",
+    "forecasting",
+    "identity",
+]
 
 
 def run(cmd: list[str]) -> str:
@@ -235,18 +245,37 @@ def promote(app: str) -> None:
     print("  (ArgoCD will sync automatically)")
 
 
+def validate_app(app: str) -> None:
+    """Validate that the app name is a known service."""
+    if app not in SERVICES:
+        print(f"Unknown service: {app}")
+        print(f"Known services: {', '.join(SERVICES)}")
+        sys.exit(1)
+
+
 def main() -> None:
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
 
     command = sys.argv[1]
-    app = sys.argv[2]
 
     if command == "status":
-        status(app)
+        if len(sys.argv) >= 3 and sys.argv[2] == "--all":
+            for app in SERVICES:
+                status(app)
+        elif len(sys.argv) >= 3:
+            validate_app(sys.argv[2])
+            status(sys.argv[2])
+        else:
+            print("Usage: ib status <app> | ib status --all")
+            sys.exit(1)
     elif command == "promote":
-        promote(app)
+        if len(sys.argv) < 3:
+            print("Usage: ib promote <app>")
+            sys.exit(1)
+        validate_app(sys.argv[2])
+        promote(sys.argv[2])
     else:
         print(f"Unknown command: {command}")
         print("Available commands: status, promote")

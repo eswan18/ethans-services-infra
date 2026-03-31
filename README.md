@@ -44,6 +44,9 @@ The `ib.py` script helps manage staging-to-prod promotions via ArgoCD.
 # Check deployment status for an app
 ib status fitness-api
 
+# Check status for all services
+ib status --all
+
 # Promote staging to prod
 ib promote fitness-api
 ```
