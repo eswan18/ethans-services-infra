@@ -2,12 +2,12 @@
 Deployment status and promotion helper for GKE services.
 
 Usage:
-    uv run deploy status <app>     # Show current images for staging and prod
-    uv run deploy promote <app>    # Compare staging vs prod, offer to promote
+    ib status <app>     # Show current images for staging and prod
+    ib promote <app>    # Compare staging vs prod, offer to promote
 
 Examples:
-    uv run deploy status fitness-api
-    uv run deploy promote fitness-dashboard
+    ib status fitness-api
+    ib promote fitness-dashboard
 """
 
 import json
@@ -120,7 +120,7 @@ def status(app: str) -> None:
                 uses_suffix = "-staging" in staging_tag or "-prod" in prod_tag
                 new_prod_tag = f"{staging_sha}-prod" if uses_suffix else staging_sha
                 print("\n✗ Out of sync")
-                print(f"  To promote: uv run deploy.py promote {app}")
+                print(f"  To promote: ib promote {app}")
                 print(f"  This will deploy {new_prod_tag} to prod")
     print()
 
