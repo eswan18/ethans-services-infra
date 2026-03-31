@@ -92,17 +92,13 @@ def status(app: str, quiet: bool = False) -> bool | None:
     prod_images = get_deployed_images(f"{app}-prod")
 
     if quiet:
-        # Indeterminate cases
         if not staging_images or not prod_images:
-            print(f"{app}: unknown", file=sys.stderr)
             return None
         if len(staging_images) > 1 or len(prod_images) > 1:
-            print(f"{app}: unknown", file=sys.stderr)
             return None
         staging_sha = extract_sha(extract_tag(next(iter(staging_images))))
         prod_sha = extract_sha(extract_tag(next(iter(prod_images))))
         if not staging_sha or not prod_sha:
-            print(f"{app}: unknown", file=sys.stderr)
             return None
         if staging_sha == prod_sha:
             return True
@@ -300,15 +296,11 @@ def main() -> None:
             results = [status(app, quiet=quiet) for app in SERVICES]
             if any(r is False for r in results):
                 sys.exit(1)
-            elif any(r is None for r in results):
-                sys.exit(2)
         elif args:
             validate_app(args[0])
             result = status(args[0], quiet=quiet)
             if result is False:
                 sys.exit(1)
-            elif result is None:
-                sys.exit(2)
         else:
             print("Usage: ib status <app> | ib status --all")
             sys.exit(1)
