@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-deploy = "deploy:main"
+ib = "ib:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]

@@ -38,14 +38,17 @@ pulumi up
 
 ## Deployment Helper
 
-The `deploy.py` script helps manage staging-to-prod promotions via ArgoCD.
+The `ib.py` script helps manage staging-to-prod promotions via ArgoCD.
 
 ```bash
 # Check deployment status for an app
-uv run deploy status fitness-api
+ib status fitness-api
+
+# Check status for all services
+ib status --all
 
 # Promote staging to prod
-uv run deploy promote fitness-api
+ib promote fitness-api
 ```
 
 The `status` command shows current image tags for both environments and whether they're in sync. If out of sync, it tells you the command to promote.

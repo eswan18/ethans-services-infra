@@ -2,12 +2,17 @@
 Deployment status and promotion helper for GKE services.
 
 Usage:
-    uv run deploy status <app>     # Show current images for staging and prod
-    uv run deploy promote <app>    # Compare staging vs prod, offer to promote
+    ib status <app>         # Show current images for staging and prod
+    ib status --all         # Show status for all services
+    ib status <app> -q      # Exit 0 if in sync, 1 if not (minimal output)
+    ib status --all -q      # List only out-of-sync services
+    ib promote <app>        # Compare staging vs prod, offer to promote
 
 Examples:
-    uv run deploy status fitness-api
-    uv run deploy promote fitness-dashboard
+    ib status fitness-api
+    ib status --all
+    ib status --all -q
+    ib promote fitness-dashboard
 """
 
 import json
@@ -16,6 +21,14 @@ import sys
 import re
 
 REGISTRY = "us-central1-docker.pkg.dev/ethans-services/containers"
+
+SERVICES = [
+    "asset-manager",
+    "fitness-api",
+    "fitness-dashboard",
+    "forecasting",
+    "identity",
+]
 
 
 def run(cmd: list[str]) -> str:
@@ -70,10 +83,27 @@ def extract_sha(tag: str) -> str | None:
     return None
 
 
-def status(app: str) -> None:
-    """Show current deployment status for an app."""
+def status(app: str, quiet: bool = False) -> bool | None:
+    """Show current deployment status for an app.
+
+    Returns True if in sync, False if out of sync, None if indeterminate.
+    """
     staging_images = get_deployed_images(f"{app}-staging")
     prod_images = get_deployed_images(f"{app}-prod")
+
+    if quiet:
+        if not staging_images or not prod_images:
+            return None
+        if len(staging_images) > 1 or len(prod_images) > 1:
+            return None
+        staging_sha = extract_sha(extract_tag(next(iter(staging_images))))
+        prod_sha = extract_sha(extract_tag(next(iter(prod_images))))
+        if not staging_sha or not prod_sha:
+            return None
+        if staging_sha == prod_sha:
+            return True
+        print(app)
+        return False
 
     print(f"\n{app} deployment status:")
     print("-" * 50)
@@ -107,22 +137,27 @@ def status(app: str) -> None:
     # Check for mismatches within environments
     if len(staging_images) > 1:
         print("\n⚠ Staging has an image mismatch (deployment in progress?)")
+        return None
     elif len(prod_images) > 1:
         print("\n⚠ Prod has an image mismatch (deployment in progress?)")
+        return None
     elif staging_tag and prod_tag:
         staging_sha = extract_sha(staging_tag)
         prod_sha = extract_sha(prod_tag)
         if staging_sha and prod_sha:
             if staging_sha == prod_sha:
                 print("\n✓ In sync")
+                return True
             else:
                 # Determine what the new prod tag would be
                 uses_suffix = "-staging" in staging_tag or "-prod" in prod_tag
                 new_prod_tag = f"{staging_sha}-prod" if uses_suffix else staging_sha
                 print("\n✗ Out of sync")
-                print(f"  To promote: uv run deploy.py promote {app}")
+                print(f"  To promote: ib promote {app}")
                 print(f"  This will deploy {new_prod_tag} to prod")
+                return False
     print()
+    return None
 
 
 def promote(app: str) -> None:
@@ -235,18 +270,46 @@ def promote(app: str) -> None:
     print("  (ArgoCD will sync automatically)")
 
 
+def validate_app(app: str) -> None:
+    """Validate that the app name is a known service."""
+    if app not in SERVICES:
+        print(f"Unknown service: {app}")
+        print(f"Known services: {', '.join(SERVICES)}")
+        sys.exit(1)
+
+
 def main() -> None:
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
 
     command = sys.argv[1]
-    app = sys.argv[2]
 
     if command == "status":
-        status(app)
+        args = sys.argv[2:]
+        quiet = "-q" in args or "--quiet" in args
+        args = [a for a in args if a not in ("-q", "--quiet")]
+        all_mode = "--all" in args
+        args = [a for a in args if a != "--all"]
+
+        if all_mode:
+            results = [status(app, quiet=quiet) for app in SERVICES]
+            if any(r is False for r in results):
+                sys.exit(1)
+        elif args:
+            validate_app(args[0])
+            result = status(args[0], quiet=quiet)
+            if result is False:
+                sys.exit(1)
+        else:
+            print("Usage: ib status <app> | ib status --all")
+            sys.exit(1)
     elif command == "promote":
-        promote(app)
+        if len(sys.argv) < 3:
+            print("Usage: ib promote <app>")
+            sys.exit(1)
+        validate_app(sys.argv[2])
+        promote(sys.argv[2])
     else:
         print(f"Unknown command: {command}")
         print("Available commands: status, promote")
