@@ -2,16 +2,16 @@
 Deployment status and promotion helper for GKE services.
 
 Usage:
+    ib status               # Show status for all services
     ib status <app>         # Show current images for staging and prod
-    ib status --all         # Show status for all services
+    ib status -q            # List out-of-sync services (* = mid-deploy)
     ib status <app> -q      # Exit 0 if in sync, 1 if not (minimal output)
-    ib status --all -q      # List only out-of-sync services
     ib promote <app>        # Compare staging vs prod, offer to promote
 
 Examples:
+    ib status
     ib status fitness-api
-    ib status --all
-    ib status --all -q
+    ib status -q
     ib promote fitness-dashboard
 """
 
@@ -95,6 +95,7 @@ def status(app: str, quiet: bool = False) -> bool | None:
         if not staging_images or not prod_images:
             return None
         if len(staging_images) > 1 or len(prod_images) > 1:
+            print(f"{app}*")
             return None
         staging_sha = extract_sha(extract_tag(next(iter(staging_images))))
         prod_sha = extract_sha(extract_tag(next(iter(prod_images))))
@@ -289,21 +290,16 @@ def main() -> None:
         args = sys.argv[2:]
         quiet = "-q" in args or "--quiet" in args
         args = [a for a in args if a not in ("-q", "--quiet")]
-        all_mode = "--all" in args
-        args = [a for a in args if a != "--all"]
 
-        if all_mode:
-            results = [status(app, quiet=quiet) for app in SERVICES]
-            if any(r is False for r in results):
-                sys.exit(1)
-        elif args:
+        if args:
             validate_app(args[0])
             result = status(args[0], quiet=quiet)
             if result is False:
                 sys.exit(1)
         else:
-            print("Usage: ib status <app> | ib status --all")
-            sys.exit(1)
+            results = [status(app, quiet=quiet) for app in SERVICES]
+            if any(r is False for r in results):
+                sys.exit(1)
     elif command == "promote":
         if len(sys.argv) < 3:
             print("Usage: ib promote <app>")
