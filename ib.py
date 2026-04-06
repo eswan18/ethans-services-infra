@@ -7,6 +7,7 @@ Usage:
     ib status -q            # List out-of-sync services (* = mid-deploy)
     ib status <app> -q      # Exit 0 if in sync, 1 if not (minimal output)
     ib promote <app>        # Compare staging vs prod, offer to promote
+    ib promote <app> -y     # Promote without confirmation
 
 Examples:
     ib status
@@ -161,7 +162,7 @@ def status(app: str, quiet: bool = False) -> bool | None:
     return None
 
 
-def promote(app: str) -> None:
+def promote(app: str, yes: bool = False) -> None:
     """Compare staging vs prod and offer to promote."""
     staging_ns = f"{app}-staging"
     prod_ns = f"{app}-prod"
@@ -226,11 +227,12 @@ def promote(app: str) -> None:
     new_prod_image = f"{image_base}:{new_prod_tag}"
 
     print(f"\n→ Promote prod to: {new_prod_tag}")
-    response = input("\nProceed? [y/N] ").strip().lower()
 
-    if response != "y":
-        print("Aborted.")
-        return
+    if not yes:
+        response = input("\nProceed? [y/N] ").strip().lower()
+        if response != "y":
+            print("Aborted.")
+            return
 
     # Run argocd app set
     argocd_app = f"{app}-prod"
@@ -302,10 +304,12 @@ def main() -> None:
                 sys.exit(1)
     elif command == "promote":
         if len(sys.argv) < 3:
-            print("Usage: ib promote <app>")
+            print("Usage: ib promote <app> [-y/--yes]")
             sys.exit(1)
+        args = sys.argv[3:]
+        yes = "-y" in args or "--yes" in args
         validate_app(sys.argv[2])
-        promote(sys.argv[2])
+        promote(sys.argv[2], yes=yes)
     else:
         print(f"Unknown command: {command}")
         print("Available commands: status, promote")
