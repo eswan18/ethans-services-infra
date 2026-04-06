@@ -4,7 +4,7 @@ Deployment status and promotion helper for GKE services.
 Usage:
     ib status               # Show status for all services
     ib status <app>         # Show current images for staging and prod
-    ib status -q            # List only out-of-sync services
+    ib status -q            # List out-of-sync services (* = mid-deploy)
     ib status <app> -q      # Exit 0 if in sync, 1 if not (minimal output)
     ib promote <app>        # Compare staging vs prod, offer to promote
 
@@ -95,6 +95,7 @@ def status(app: str, quiet: bool = False) -> bool | None:
         if not staging_images or not prod_images:
             return None
         if len(staging_images) > 1 or len(prod_images) > 1:
+            print(f"{app}*")
             return None
         staging_sha = extract_sha(extract_tag(next(iter(staging_images))))
         prod_sha = extract_sha(extract_tag(next(iter(prod_images))))
