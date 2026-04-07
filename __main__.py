@@ -8,6 +8,7 @@ from pulumi_gcp import (
     artifactregistry,
     secretmanager,
     cloudbuild,
+    pubsub,
 )
 import pulumi_kubernetes as k8s
 
@@ -344,6 +345,18 @@ forecasting_prod_sa = serviceaccount.Account(
     display_name="Forecasting Prod Service Account",
     project=project,
 )
+comms_staging_sa = serviceaccount.Account(
+    "comms-staging-sa",
+    account_id="comms-staging-sa",
+    display_name="Comms Staging Service Account",
+    project=project,
+)
+comms_prod_sa = serviceaccount.Account(
+    "comms-prod-sa",
+    account_id="comms-prod-sa",
+    display_name="Comms Prod Service Account",
+    project=project,
+)
 argocd_image_updater_sa = serviceaccount.Account(
     "argocd-image-updater-sa",
     account_id="argocd-image-updater-sa",
@@ -399,6 +412,18 @@ forecasting_staging_wi = serviceaccount.IAMMember(
     service_account_id=forecasting_staging_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[forecasting-staging/forecasting-staging-ksa]",
+)
+comms_prod_wi = serviceaccount.IAMMember(
+    "comms-prod-workload-identity",
+    service_account_id=comms_prod_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[comms-prod/comms-prod-ksa]",
+)
+comms_staging_wi = serviceaccount.IAMMember(
+    "comms-staging-workload-identity",
+    service_account_id=comms_staging_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[comms-staging/comms-staging-ksa]",
 )
 
 # Secret Manager access (per-secret IAM bindings)
@@ -488,6 +513,18 @@ secret_access = {
             "forecasting_staging_idp_client_secret",
         ],
     ),
+    "comms-prod": (
+        comms_prod_sa,
+        [
+            "comms_prod_resend_api_key",
+        ],
+    ),
+    "comms-staging": (
+        comms_staging_sa,
+        [
+            "comms_staging_resend_api_key",
+        ],
+    ),
 }
 # Artifact Registry access for ArgoCD Image Updater
 argocd_image_updater_ar = projects.IAMMember(
@@ -553,6 +590,10 @@ secret_names = [
     "forecasting_staging_idp_client_secret",
     # forecasting build (used by Cloud Build, not the app)
     "forecasting_sentry_auth_token",
+    # comms prod
+    "comms_prod_resend_api_key",
+    # comms staging
+    "comms_staging_resend_api_key",
 ]
 secrets = {}
 for name in secret_names:
@@ -660,6 +701,93 @@ forecasting_build = cloudbuild.Trigger(
     project=project,
     service_account=cloud_build_sa,
 )
+comms_build = cloudbuild.Trigger(
+    "comms-build",
+    filename="cloudbuild.yaml",
+    github=cloudbuild.TriggerGithubArgs(
+        name="comms",
+        owner=github_owner,
+        push=cloudbuild.TriggerGithubPushArgs(
+            branch="^main$",
+        ),
+    ),
+    name="comms-build",
+    project=project,
+    service_account=cloud_build_sa,
+)
+
+# Pub/Sub topics and subscriptions for event-driven notifications
+# One topic per source service per environment; comms subscribes to all of them.
+pubsub_config = {
+    "staging": {
+        "topics": {
+            "fitness-events-staging": fitness_api_staging_sa,
+            "identity-events-staging": identity_staging_sa,
+            "asset-events-staging": asset_manager_staging_sa,
+        },
+        "subscriber_sa": comms_staging_sa,
+        "subscriptions": {
+            "comms-staging-fitness-sub": "fitness-events-staging",
+            "comms-staging-identity-sub": "identity-events-staging",
+            "comms-staging-asset-sub": "asset-events-staging",
+        },
+    },
+    "prod": {
+        "topics": {
+            "fitness-events-prod": fitness_api_prod_sa,
+            "identity-events-prod": identity_prod_sa,
+            "asset-events-prod": asset_manager_prod_sa,
+        },
+        "subscriber_sa": comms_prod_sa,
+        "subscriptions": {
+            "comms-prod-fitness-sub": "fitness-events-prod",
+            "comms-prod-identity-sub": "identity-events-prod",
+            "comms-prod-asset-sub": "asset-events-prod",
+        },
+    },
+}
+
+pubsub_topics = {}
+for env, env_config in pubsub_config.items():
+    for topic_name, publisher_sa in env_config["topics"].items():
+        topic = pubsub.Topic(
+            topic_name,
+            name=topic_name,
+            project=project,
+        )
+        pubsub_topics[topic_name] = topic
+
+        # Grant the source service permission to publish
+        pubsub.TopicIAMMember(
+            f"{topic_name}-publisher",
+            project=project,
+            topic=topic.name,
+            role="roles/pubsub.publisher",
+            member=publisher_sa.email.apply(
+                lambda email: f"serviceAccount:{email}"
+            ),
+        )
+
+    subscriber_sa = env_config["subscriber_sa"]
+    for sub_name, topic_name in env_config["subscriptions"].items():
+        subscription = pubsub.Subscription(
+            sub_name,
+            name=sub_name,
+            topic=pubsub_topics[topic_name].name,
+            project=project,
+            ack_deadline_seconds=60,
+        )
+
+        # Grant comms permission to consume
+        pubsub.SubscriptionIAMMember(
+            f"{sub_name}-subscriber",
+            project=project,
+            subscription=subscription.name,
+            role="roles/pubsub.subscriber",
+            member=subscriber_sa.email.apply(
+                lambda email: f"serviceAccount:{email}"
+            ),
+        )
 
 # ArgoCD (Helm)
 argocd_release = k8s.helm.v3.Release(
