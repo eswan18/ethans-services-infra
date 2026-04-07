@@ -665,7 +665,7 @@ forecasting_build = cloudbuild.Trigger(
 argocd_release = k8s.helm.v3.Release(
     "argocd",
     chart="argo-cd",
-    version="9.4.1",
+    version="9.4.10",
     namespace="argocd",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://argoproj.github.io/argo-helm",
@@ -683,11 +683,11 @@ argocd_release = k8s.helm.v3.Release(
         },
         "repoServer": {
             "resources": {
-                "requests": {"cpu": "100m", "memory": "256Mi"},
-                "limits": {"cpu": "500m", "memory": "512Mi"},
+                "requests": {"cpu": "250m", "memory": "256Mi"},
+                "limits": {"cpu": "1", "memory": "1Gi"},
             },
             "livenessProbe": {
-                "timeoutSeconds": 5,
+                "timeoutSeconds": 10,
                 "failureThreshold": 5,
             },
             "readinessProbe": {
@@ -710,7 +710,7 @@ argocd_release = k8s.helm.v3.Release(
 argocd_image_updater_release = k8s.helm.v3.Release(
     "argocd-image-updater",
     chart="argocd-image-updater",
-    version="1.0.5",
+    version="1.1.3",
     namespace="argocd",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://argoproj.github.io/argo-helm",
