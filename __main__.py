@@ -357,6 +357,18 @@ comms_prod_sa = serviceaccount.Account(
     display_name="Comms Prod Service Account",
     project=project,
 )
+bifrost_staging_sa = serviceaccount.Account(
+    "bifrost-staging-sa",
+    account_id="bifrost-staging-sa",
+    display_name="Bifrost Staging Service Account",
+    project=project,
+)
+bifrost_prod_sa = serviceaccount.Account(
+    "bifrost-prod-sa",
+    account_id="bifrost-prod-sa",
+    display_name="Bifrost Prod Service Account",
+    project=project,
+)
 argocd_image_updater_sa = serviceaccount.Account(
     "argocd-image-updater-sa",
     account_id="argocd-image-updater-sa",
@@ -424,6 +436,18 @@ comms_staging_wi = serviceaccount.IAMMember(
     service_account_id=comms_staging_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[comms-staging/comms-staging-ksa]",
+)
+bifrost_prod_wi = serviceaccount.IAMMember(
+    "bifrost-prod-workload-identity",
+    service_account_id=bifrost_prod_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[bifrost-prod/bifrost-prod-ksa]",
+)
+bifrost_staging_wi = serviceaccount.IAMMember(
+    "bifrost-staging-workload-identity",
+    service_account_id=bifrost_staging_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[bifrost-staging/bifrost-staging-ksa]",
 )
 
 # Secret Manager access (per-secret IAM bindings)
@@ -527,6 +551,22 @@ secret_access = {
             "comms_staging_resend_api_key",
         ],
     ),
+    "bifrost-prod": (
+        bifrost_prod_sa,
+        [
+            "bifrost_prod_oidc_client_id",
+            "bifrost_prod_oidc_client_secret",
+            "bifrost_prod_session_secret",
+        ],
+    ),
+    "bifrost-staging": (
+        bifrost_staging_sa,
+        [
+            "bifrost_staging_oidc_client_id",
+            "bifrost_staging_oidc_client_secret",
+            "bifrost_staging_session_secret",
+        ],
+    ),
 }
 # Artifact Registry access for ArgoCD Image Updater
 argocd_image_updater_ar = projects.IAMMember(
@@ -598,6 +638,14 @@ secret_names = [
     "comms_prod_resend_api_key",
     # comms staging
     "comms_staging_resend_api_key",
+    # bifrost prod
+    "bifrost_prod_oidc_client_id",
+    "bifrost_prod_oidc_client_secret",
+    "bifrost_prod_session_secret",
+    # bifrost staging
+    "bifrost_staging_oidc_client_id",
+    "bifrost_staging_oidc_client_secret",
+    "bifrost_staging_session_secret",
 ]
 secrets = {}
 for name in secret_names:
@@ -716,6 +764,20 @@ comms_build = cloudbuild.Trigger(
         ),
     ),
     name="comms-build",
+    project=project,
+    service_account=cloud_build_sa,
+)
+bifrost_build = cloudbuild.Trigger(
+    "bifrost-build",
+    filename="cloudbuild.yaml",
+    github=cloudbuild.TriggerGithubArgs(
+        name="bifrost",
+        owner=github_owner,
+        push=cloudbuild.TriggerGithubPushArgs(
+            branch="^main$",
+        ),
+    ),
+    name="bifrost-build",
     project=project,
     service_account=cloud_build_sa,
 )

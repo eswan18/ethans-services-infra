@@ -25,6 +25,7 @@ REGISTRY = "us-central1-docker.pkg.dev/ethans-services/containers"
 
 SERVICES = [
     "asset-manager",
+    "bifrost",
     "comms",
     "fitness-api",
     "fitness-dashboard",
