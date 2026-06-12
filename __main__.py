@@ -576,6 +576,20 @@ argocd_image_updater_ar = projects.IAMMember(
     member=argocd_image_updater_sa.email.apply(lambda email: f"serviceAccount:{email}"),
 )
 
+# Cloud Build read access for bifrost (shows build status in its UI)
+bifrost_staging_builds_viewer = projects.IAMMember(
+    "bifrost-staging-builds-viewer",
+    project=project,
+    role="roles/cloudbuild.builds.viewer",
+    member=bifrost_staging_sa.email.apply(lambda email: f"serviceAccount:{email}"),
+)
+bifrost_prod_builds_viewer = projects.IAMMember(
+    "bifrost-prod-builds-viewer",
+    project=project,
+    role="roles/cloudbuild.builds.viewer",
+    member=bifrost_prod_sa.email.apply(lambda email: f"serviceAccount:{email}"),
+)
+
 # Secret Manager secrets (structure only - values managed outside Pulumi)
 secret_names = [
     # fitness-api prod
