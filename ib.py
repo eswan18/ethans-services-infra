@@ -86,6 +86,20 @@ def extract_sha(tag: str) -> str | None:
     return None
 
 
+def new_prod_tag_for(staging_tag: str, prod_tag: str | None, staging_sha: str) -> str:
+    """Compute the prod tag to deploy when promoting `staging_sha`.
+
+    The tag scheme must follow the artifact actually being promoted, which is
+    the staging image -- NOT the current prod image. A service can migrate to
+    environment-agnostic builds (plain `{sha}` + `latest`, no `-prod`/`-staging`
+    suffix) while prod still runs a legacy `{sha}-prod` image. Keying off the
+    stale prod tag in that window synthesizes a `{sha}-prod` reference that was
+    never built, causing ImagePullBackOff (forecasting prod outage, June 2026).
+    """
+    uses_suffix = "-staging" in staging_tag
+    return f"{staging_sha}-prod" if uses_suffix else staging_sha
+
+
 def status(app: str, quiet: bool = False) -> bool | None:
     """Show current deployment status for an app.
 
@@ -154,8 +168,7 @@ def status(app: str, quiet: bool = False) -> bool | None:
                 return True
             else:
                 # Determine what the new prod tag would be
-                uses_suffix = "-staging" in staging_tag or "-prod" in prod_tag
-                new_prod_tag = f"{staging_sha}-prod" if uses_suffix else staging_sha
+                new_prod_tag = new_prod_tag_for(staging_tag, prod_tag, staging_sha)
                 print("\n✗ Out of sync")
                 print(f"  To promote: ib promote {app}")
                 print(f"  This will deploy {new_prod_tag} to prod")
@@ -217,13 +230,9 @@ def promote(app: str, yes: bool = False) -> None:
         print(f"\nWarning: Could not parse staging SHA from '{staging_tag}'")
         return
 
-    # Determine if this app uses suffixed tags
-    uses_suffix = "-staging" in staging_tag or "-prod" in prod_tag
-
-    if uses_suffix:
-        new_prod_tag = f"{staging_sha}-prod"
-    else:
-        new_prod_tag = staging_sha
+    # Determine the prod tag from the artifact being promoted (staging),
+    # not the current prod tag -- see new_prod_tag_for.
+    new_prod_tag = new_prod_tag_for(staging_tag, prod_tag, staging_sha)
 
     image_base = f"{REGISTRY}/{app}"
     new_prod_image = f"{image_base}:{new_prod_tag}"
