@@ -314,13 +314,14 @@ def main() -> None:
             if any(r is False for r in results):
                 sys.exit(1)
     elif command == "promote":
-        if len(sys.argv) < 3:
+        args = sys.argv[2:]
+        yes = "-y" in args or "--yes" in args
+        args = [a for a in args if a not in ("-y", "--yes")]
+        if not args:
             print("Usage: ib promote <app> [-y/--yes]")
             sys.exit(1)
-        args = sys.argv[3:]
-        yes = "-y" in args or "--yes" in args
-        validate_app(sys.argv[2])
-        promote(sys.argv[2], yes=yes)
+        validate_app(args[0])
+        promote(args[0], yes=yes)
     else:
         print(f"Unknown command: {command}")
         print("Available commands: status, promote")
