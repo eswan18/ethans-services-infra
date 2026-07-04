@@ -464,6 +464,8 @@ secret_access = {
             "fitness_api_prod_strava_client_id",
             "fitness_api_prod_strava_client_secret",
             "fitness_api_prod_trmnl_api_key",
+            "fitness_api_prod_r2_access_key_id",
+            "fitness_api_prod_r2_secret_access_key",
         ],
     ),
     "fitness-api-staging": (
@@ -477,6 +479,8 @@ secret_access = {
             "fitness_api_staging_strava_client_id",
             "fitness_api_staging_strava_client_secret",
             "fitness_api_staging_trmnl_api_key",
+            "fitness_api_staging_r2_access_key_id",
+            "fitness_api_staging_r2_secret_access_key",
         ],
     ),
     "identity-prod": (
@@ -601,6 +605,8 @@ secret_names = [
     "fitness_api_prod_strava_client_id",
     "fitness_api_prod_strava_client_secret",
     "fitness_api_prod_trmnl_api_key",
+    "fitness_api_prod_r2_access_key_id",
+    "fitness_api_prod_r2_secret_access_key",
     # fitness-api staging
     "fitness_api_staging_database_url",
     "fitness_api_staging_google_client_id",
@@ -610,6 +616,8 @@ secret_names = [
     "fitness_api_staging_strava_client_id",
     "fitness_api_staging_strava_client_secret",
     "fitness_api_staging_trmnl_api_key",
+    "fitness_api_staging_r2_access_key_id",
+    "fitness_api_staging_r2_secret_access_key",
     # identity prod
     "identity_prod_database_url",
     "identity_prod_jwt_private_key",
