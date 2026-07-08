@@ -9,6 +9,7 @@ from pulumi_gcp import (
     secretmanager,
     cloudbuild,
     pubsub,
+    monitoring,
 )
 import pulumi_kubernetes as k8s
 
@@ -933,6 +934,90 @@ tailscale_operator_release = k8s.helm.v3.Release(
         },
     },
     opts=pulumi.ResourceOptions(provider=k8s_provider),
+)
+
+# Uptime checks: probe each prod app's health endpoint through the full public
+# path (Cloudflare edge -> tunnel -> cloudflared -> service -> pod), catching
+# outages the in-cluster restart alert can't see. US-only; the API requires a
+# minimum of 3 probe locations, so this is the smallest allowed footprint.
+prod_health_checks = {
+    "fitness-dashboard": ("fitness.ethanswan.com", "/health"),
+    "fitness-api": ("fitness-api.ethanswan.com", "/health"),
+    "identity": ("identity.ethanswan.com", "/health"),
+    "forecasting": ("forecasting.ethanswan.com", "/api/health"),
+    "asset-manager": ("assets.ethanswan.com", "/health"),
+    "bifrost": ("bifrost.ethanswan.com", "/health"),
+}
+
+for app, (host, path) in prod_health_checks.items():
+    monitoring.UptimeCheckConfig(
+        f"{app}-prod-uptime",
+        display_name=f"{app} prod health",
+        project=project,
+        period="60s",
+        timeout="10s",
+        selected_regions=["USA_OREGON", "USA_IOWA", "USA_VIRGINIA"],
+        http_check={
+            "path": path,
+            "port": 443,
+            "use_ssl": True,
+            "validate_ssl": True,
+            "request_method": "GET",
+        },
+        monitored_resource={
+            "type": "uptime_url",
+            "labels": {"project_id": project, "host": host},
+        },
+    )
+
+# One policy covers all uptime checks (grouped by host, so each app alerts
+# independently and future checks are included automatically). Reuses the
+# manually-created email channel that the Pod Crash Loop policy also uses.
+alert_email_channel = (
+    "projects/ethans-services/notificationChannels/15094861386382175881"
+)
+
+monitoring.AlertPolicy(
+    "prod-uptime-alert",
+    display_name="Prod Uptime Check Failure",
+    project=project,
+    combiner="OR",
+    conditions=[
+        {
+            "display_name": "Health endpoint failing from multiple locations",
+            "condition_threshold": {
+                "filter": (
+                    'metric.type="monitoring.googleapis.com/uptime_check/check_passed"'
+                    ' AND resource.type="uptime_url"'
+                ),
+                "aggregations": [
+                    {
+                        "alignment_period": "120s",
+                        "per_series_aligner": "ALIGN_NEXT_OLDER",
+                        "cross_series_reducer": "REDUCE_COUNT_FALSE",
+                        "group_by_fields": ["resource.label.host"],
+                    }
+                ],
+                "comparison": "COMPARISON_GT",
+                "threshold_value": 1,
+                "duration": "180s",
+                "trigger": {"count": 1},
+            },
+        }
+    ],
+    notification_channels=[alert_email_channel],
+    documentation={
+        "content": (
+            "A prod health endpoint has been failing its uptime check from"
+            " multiple US locations for 3+ minutes. The full public path is"
+            " affected (Cloudflare tunnel -> cloudflared -> service -> pod).\n\n"
+            "Expected during the GKE maintenance window (08:00-12:00 UTC)"
+            " while the single node upgrades.\n\n"
+            "Triage: `kubectl get pods -A | grep -v Running`, then"
+            " `kubectl get pods -n cloudflared` and `ib status <app>`."
+        ),
+        "mime_type": "text/markdown",
+    },
 )
 
 # Export cluster info
