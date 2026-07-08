@@ -68,6 +68,13 @@ main_cluster = container.Cluster(
             "WORKLOADS",
         ],
     },
+    # Confine GKE auto-upgrades (node + control plane) to 08:00-12:00 UTC,
+    # i.e. 3-7am Chicago: single-node cluster, so upgrades mean brief downtime.
+    maintenance_policy={
+        "daily_maintenance_window": {
+            "start_time": "08:00",
+        },
+    },
     master_auth={
         "client_certificate_config": {
             "issue_client_certificate": False,
@@ -78,13 +85,14 @@ main_cluster = container.Cluster(
             "enable_metrics": False,
             "enable_relay": False,
         },
+        # CADVISOR/KUBELET + managed Prometheus were GKE creation defaults:
+        # ~$22/mo of samples with no dashboards or alerts reading them. Free
+        # SYSTEM_COMPONENTS metrics (kubernetes.io/*) cover the crash-loop alert.
         "enable_components": [
             "SYSTEM_COMPONENTS",
-            "CADVISOR",
-            "KUBELET",
         ],
         "managed_prometheus": {
-            "enabled": True,
+            "enabled": False,
         },
     },
     name="main-cluster",
@@ -97,9 +105,9 @@ main_cluster = container.Cluster(
     node_config={
         "boot_disk": {
             "disk_type": "pd-balanced",
-            "size_gb": 20,
+            "size_gb": 100,
         },
-        "disk_size_gb": 20,
+        "disk_size_gb": 100,
         "disk_type": "pd-balanced",
         "image_type": "COS_CONTAINERD",
         "kubelet_config": {
@@ -107,7 +115,7 @@ main_cluster = container.Cluster(
             "max_parallel_image_pulls": 2,
         },
         "logging_variant": "DEFAULT",
-        "machine_type": "e2-medium",
+        "machine_type": "e2-standard-2",
         "metadata": {
             "disable-legacy-endpoints": "true",
         },
@@ -120,10 +128,9 @@ main_cluster = container.Cluster(
             "https://www.googleapis.com/auth/trace.append",
         ],
         "resource_labels": {
-            "goog-gke-node-pool-provisioning-model": "spot",
+            "goog-gke-node-pool-provisioning-model": "on-demand",
         },
         "service_account": "default",
-        "spot": True,
         "workload_metadata_config": {
             "mode": "GKE_METADATA",
         },
@@ -140,55 +147,6 @@ main_cluster = container.Cluster(
         },
     },
     node_pools=[
-        {
-            "initial_node_count": 1,
-            "max_pods_per_node": 110,
-            "name": "spot-pool-medium",
-            "network_config": {
-                "pod_ipv4_cidr_block": "10.36.0.0/14",
-                "pod_range": "gke-main-cluster-pods-3fd139f8",
-            },
-            "node_config": {
-                "boot_disk": {
-                    "disk_type": "pd-balanced",
-                    "size_gb": 20,
-                },
-                "disk_size_gb": 20,
-                "disk_type": "pd-balanced",
-                "image_type": "COS_CONTAINERD",
-                "kubelet_config": {
-                    "insecure_kubelet_readonly_port_enabled": "FALSE",
-                    "max_parallel_image_pulls": 2,
-                },
-                "logging_variant": "DEFAULT",
-                "machine_type": "e2-medium",
-                "metadata": {
-                    "disable-legacy-endpoints": "true",
-                },
-                "oauth_scopes": [
-                    "https://www.googleapis.com/auth/devstorage.read_only",
-                    "https://www.googleapis.com/auth/logging.write",
-                    "https://www.googleapis.com/auth/monitoring",
-                    "https://www.googleapis.com/auth/service.management.readonly",
-                    "https://www.googleapis.com/auth/servicecontrol",
-                    "https://www.googleapis.com/auth/trace.append",
-                ],
-                "resource_labels": {
-                    "goog-gke-node-pool-provisioning-model": "spot",
-                },
-                "service_account": "default",
-                "spot": True,
-                "workload_metadata_config": {
-                    "mode": "GKE_METADATA",
-                },
-            },
-            "node_count": 1,
-            "node_locations": [zone],
-            "upgrade_settings": {
-                "max_surge": 1,
-            },
-            "version": "1.33.5-gke.2172001",
-        },
         {
             "initial_node_count": 1,
             "max_pods_per_node": 110,
@@ -235,10 +193,8 @@ main_cluster = container.Cluster(
             "upgrade_settings": {
                 "max_surge": 1,
             },
-            "version": "1.33.5-gke.2172001",
         },
     ],
-    node_version="1.33.5-gke.2172001",
     notification_config={
         "pubsub": {
             "enabled": False,
