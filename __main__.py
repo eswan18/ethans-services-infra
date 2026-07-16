@@ -925,8 +925,8 @@ tailscale_operator_release = k8s.helm.v3.Release(
 # outages the in-cluster restart alert can't see. US-only; the API requires a
 # minimum of 3 probe locations, so this is the smallest allowed footprint.
 prod_health_checks = {
-    "fitness-dashboard": ("fitness.ethanswan.com", "/health"),
-    "fitness-api": ("fitness-api.ethanswan.com", "/health"),
+    "fitness-dashboard": ("footstrike.run", "/health"),
+    "fitness-api": ("api.footstrike.run", "/health"),
     "identity": ("identity.ethanswan.com", "/health"),
     "forecasting": ("forecasting.ethanswan.com", "/api/health"),
     "asset-manager": ("assets.ethanswan.com", "/health"),
