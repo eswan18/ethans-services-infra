@@ -650,7 +650,7 @@ fitness_api_build = cloudbuild.Trigger(
     "fitness-api-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
-        name="fitness-api",
+        name="footstrike-api",
         owner=github_owner,
         push=cloudbuild.TriggerGithubPushArgs(
             branch="^main$",
@@ -664,7 +664,7 @@ fitness_dashboard_build = cloudbuild.Trigger(
     "fitness-dashboard-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
-        name="fitness-dashboard",
+        name="footstrike-dashboard",
         owner=github_owner,
         push=cloudbuild.TriggerGithubPushArgs(
             branch="^main$",
