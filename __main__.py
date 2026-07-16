@@ -334,21 +334,8 @@ argocd_image_updater_sa = serviceaccount.Account(
 )
 
 # Workload Identity bindings
-fitness_api_prod_wi = serviceaccount.IAMMember(
-    "fitness-api-prod-workload-identity",
-    service_account_id=fitness_api_prod_sa.name,
-    role="roles/iam.workloadIdentityUser",
-    member=f"serviceAccount:{project}.svc.id.goog[fitness-api-prod/fitness-api-prod-ksa]",
-)
-fitness_api_staging_wi = serviceaccount.IAMMember(
-    "fitness-api-staging-workload-identity",
-    service_account_id=fitness_api_staging_sa.name,
-    role="roles/iam.workloadIdentityUser",
-    member=f"serviceAccount:{project}.svc.id.goog[fitness-api-staging/fitness-api-staging-ksa]",
-)
-# Footstrike rename (5b): bindings for the renamed namespaces/KSAs. The GCP SAs
-# keep their fitness-api-* names. The old-namespace bindings above are removed
-# after the cutover (old namespaces deleted).
+# (The GCP SAs keep their fitness-api-* names from before the Footstrike
+# rename; only the namespace/KSA side was renamed.)
 footstrike_api_prod_wi = serviceaccount.IAMMember(
     "footstrike-api-prod-workload-identity",
     service_account_id=fitness_api_prod_sa.name,
