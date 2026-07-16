@@ -11,9 +11,9 @@ Usage:
 
 Examples:
     ib status
-    ib status fitness-api
+    ib status footstrike-api
     ib status -q
-    ib promote fitness-dashboard
+    ib promote footstrike-dashboard
 """
 
 import json
@@ -27,8 +27,8 @@ SERVICES = [
     "asset-manager",
     "bifrost",
     "comms",
-    "fitness-api",
-    "fitness-dashboard",
+    "footstrike-api",
+    "footstrike-dashboard",
     "forecasting",
     "identity",
 ]

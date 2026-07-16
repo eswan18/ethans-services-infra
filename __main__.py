@@ -346,6 +346,21 @@ fitness_api_staging_wi = serviceaccount.IAMMember(
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[fitness-api-staging/fitness-api-staging-ksa]",
 )
+# Footstrike rename (5b): bindings for the renamed namespaces/KSAs. The GCP SAs
+# keep their fitness-api-* names. The old-namespace bindings above are removed
+# after the cutover (old namespaces deleted).
+footstrike_api_prod_wi = serviceaccount.IAMMember(
+    "footstrike-api-prod-workload-identity",
+    service_account_id=fitness_api_prod_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[footstrike-api-prod/footstrike-api-prod-ksa]",
+)
+footstrike_api_staging_wi = serviceaccount.IAMMember(
+    "footstrike-api-staging-workload-identity",
+    service_account_id=fitness_api_staging_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[footstrike-api-staging/footstrike-api-staging-ksa]",
+)
 identity_prod_wi = serviceaccount.IAMMember(
     "identity-prod-workload-identity",
     service_account_id=identity_prod_sa.name,

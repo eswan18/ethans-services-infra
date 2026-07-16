@@ -42,13 +42,13 @@ The `ib.py` script helps manage staging-to-prod promotions via ArgoCD.
 
 ```bash
 # Check deployment status for an app
-ib status fitness-api
+ib status footstrike-api
 
 # Check status for all services
 ib status --all
 
 # Promote staging to prod
-ib promote fitness-api
+ib promote footstrike-api
 ```
 
 The `status` command shows current image tags for both environments and whether they're in sync. If out of sync, it tells you the command to promote.
