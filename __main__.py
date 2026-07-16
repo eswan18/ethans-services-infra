@@ -920,6 +920,102 @@ tailscale_operator_release = k8s.helm.v3.Release(
     opts=pulumi.ResourceOptions(provider=k8s_provider),
 )
 
+# cert-manager (Helm): browser-valid TLS for custom-domain staging hosts
+# (*.staging.footstrike.run) that stay tailnet-only. Issuance uses Let's
+# Encrypt DNS-01 through the Cloudflare API, so it never needs public
+# reachability. The API token lives in Pulumi config (cloudflare-dns-api-token,
+# scoped to Zone:DNS:Edit on the footstrike.run zone only).
+cert_manager_release = k8s.helm.v3.Release(
+    "cert-manager",
+    chart="cert-manager",
+    version="v1.21.0",
+    namespace="cert-manager",
+    create_namespace=True,
+    repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+        repo="https://charts.jetstack.io",
+    ),
+    values={
+        "crds": {"enabled": True},
+        "resources": {"requests": {"cpu": "5m", "memory": "64Mi"}},
+        "cainjector": {"resources": {"requests": {"cpu": "5m", "memory": "64Mi"}}},
+        "webhook": {"resources": {"requests": {"cpu": "5m", "memory": "32Mi"}}},
+    },
+    opts=pulumi.ResourceOptions(provider=k8s_provider),
+)
+
+cloudflare_dns_token_secret = k8s.core.v1.Secret(
+    "cloudflare-dns-token",
+    metadata={
+        "name": "cloudflare-dns-token",
+        "namespace": "cert-manager",
+    },
+    string_data={"api-token": config.require_secret("cloudflare-dns-api-token")},
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[cert_manager_release],
+    ),
+)
+
+letsencrypt_dns01_issuer = k8s.apiextensions.CustomResource(
+    "letsencrypt-dns01",
+    api_version="cert-manager.io/v1",
+    kind="ClusterIssuer",
+    metadata={"name": "letsencrypt-dns01"},
+    spec={
+        "acme": {
+            "email": "ethanpswan@gmail.com",
+            "server": "https://acme-v02.api.letsencrypt.org/directory",
+            "privateKeySecretRef": {"name": "letsencrypt-dns01-account-key"},
+            "solvers": [
+                {
+                    "dns01": {
+                        "cloudflare": {
+                            "apiTokenSecretRef": {
+                                "name": "cloudflare-dns-token",
+                                "key": "api-token",
+                            }
+                        }
+                    }
+                }
+            ],
+        }
+    },
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[cert_manager_release, cloudflare_dns_token_secret],
+    ),
+)
+
+# ingress-nginx (Helm): routes the custom-domain staging hosts. Its Service is
+# a Tailscale LoadBalancer, so the controller gets a stable tailnet device
+# (staging-ingress.<tailnet>.ts.net); public grey-cloud CNAMEs for
+# staging.footstrike.run / api.staging.footstrike.run resolve to it, and only
+# tailnet members can route to the address. Service repos add Ingress
+# resources with ingressClassName: nginx + a cert-manager annotation.
+ingress_nginx_release = k8s.helm.v3.Release(
+    "ingress-nginx",
+    chart="ingress-nginx",
+    version="4.15.1",
+    namespace="ingress-nginx",
+    create_namespace=True,
+    repository_opts=k8s.helm.v3.RepositoryOptsArgs(
+        repo="https://kubernetes.github.io/ingress-nginx",
+    ),
+    values={
+        "controller": {
+            "service": {
+                "loadBalancerClass": "tailscale",
+                "annotations": {"tailscale.com/hostname": "staging-ingress"},
+            },
+            "resources": {"requests": {"cpu": "10m", "memory": "128Mi"}},
+        },
+    },
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[tailscale_operator_release],
+    ),
+)
+
 # Uptime checks: probe each prod app's health endpoint through the full public
 # path (Cloudflare edge -> tunnel -> cloudflared -> service -> pod), catching
 # outages the in-cluster restart alert can't see. US-only; the API requires a
