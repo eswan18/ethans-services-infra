@@ -43,27 +43,34 @@ def run(cmd: list[str]) -> str:
     return result.stdout.strip()
 
 
+def images_from_pods(pods: list[dict]) -> set[str]:
+    """Unique container images across a namespace's long-running pods.
+
+    Job-owned pods (cron/one-off jobs) are excluded: a completed job pod
+    keeps the image it ran with, which would read as a deployment forever
+    in progress once the deployment moves to a newer image. Everything
+    else counts regardless of phase, since mid-deploy detection relies on
+    seeing old and new pods side by side.
+    """
+    images: set[str] = set()
+    for pod in pods:
+        owners = pod.get("metadata", {}).get("ownerReferences") or []
+        if any(o.get("kind") == "Job" for o in owners if o.get("controller")):
+            continue
+        for container in pod.get("spec", {}).get("containers", []):
+            images.add(container["image"])
+    return images
+
+
 def get_deployed_images(namespace: str) -> set[str]:
     """Get all unique images currently deployed in a namespace."""
     try:
-        # Get images from all pods, space-separated
-        output = run(
-            [
-                "kubectl",
-                "get",
-                "pods",
-                "-n",
-                namespace,
-                "-o",
-                "jsonpath={.items[*].spec.containers[*].image}",
-            ]
-        )
-        if not output:
-            return set()
-        # Split on whitespace and return unique images
-        return set(output.split())
+        output = run(["kubectl", "get", "pods", "-n", namespace, "-o", "json"])
     except SystemExit:
         return set()
+    if not output:
+        return set()
+    return images_from_pods(json.loads(output).get("items", []))
 
 
 def extract_tag(image: str) -> str:
