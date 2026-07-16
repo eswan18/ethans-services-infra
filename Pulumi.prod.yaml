@@ -4,3 +4,5 @@ config:
     secure: AAABAFlZnQ9Y9/+5bjGbQOWDloxG3IiTyKFImTcJWwOI3+am37PIOIzN3rGDMFEpNQ==
   ethans-services-infra:tailscale-oauth-client-secret:
     secure: AAABAE03VpiACl4wiHHD1t3NXoKRHx2mZmm74XoCknm18K8Vcv7rAErzVbYcOHUbz+dxNxnxcwOUTMCLpHuNAysFVXoqikkswET/9rzRahUdhzU2T1O0E40uP0Z5hqH8
+  ethans-services-infra:cloudflare-dns-api-token:
+    secure: AAABAO2c9XBb3UnWFHH3b3KtxQ13ofzMH4MVE/qiev60PdhsG/0t6hFNuwJOEdSsxTzRv4mzMLjH5uIUg0adXTIgk8Zy1Y93QwVIYuP5YfIc+gTbPw==
