@@ -648,8 +648,8 @@ cloud_build_sentry_access = secretmanager.SecretIamMember(
 )
 
 # Cloud Build triggers
-fitness_api_build = cloudbuild.Trigger(
-    "fitness-api-build",
+footstrike_api_build = cloudbuild.Trigger(
+    "footstrike-api-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="footstrike-api",
@@ -658,12 +658,12 @@ fitness_api_build = cloudbuild.Trigger(
             branch="^main$",
         ),
     ),
-    name="fitness-api-build",
+    name="footstrike-api-build",
     project=project,
     service_account=cloud_build_sa,
 )
-fitness_dashboard_build = cloudbuild.Trigger(
-    "fitness-dashboard-build",
+footstrike_dashboard_build = cloudbuild.Trigger(
+    "footstrike-dashboard-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="footstrike-dashboard",
@@ -672,7 +672,7 @@ fitness_dashboard_build = cloudbuild.Trigger(
             branch="^main$",
         ),
     ),
-    name="fitness-dashboard-build",
+    name="footstrike-dashboard-build",
     project=project,
     service_account=cloud_build_sa,
 )
@@ -1023,8 +1023,8 @@ ingress_nginx_release = k8s.helm.v3.Release(
 # outages the in-cluster restart alert can't see. US-only; the API requires a
 # minimum of 3 probe locations, so this is the smallest allowed footprint.
 prod_health_checks = {
-    "fitness-dashboard": ("footstrike.run", "/health"),
-    "fitness-api": ("api.footstrike.run", "/health"),
+    "footstrike-dashboard": ("footstrike.run", "/health"),
+    "footstrike-api": ("api.footstrike.run", "/health"),
     "identity": ("identity.ethanswan.com", "/health"),
     "forecasting": ("forecasting.ethanswan.com", "/api/health"),
     "asset-manager": ("assets.ethanswan.com", "/health"),
