@@ -897,6 +897,10 @@ csi_secrets_store_release = k8s.helm.v3.Release(
     ),
     values={
         "syncSecret": {"enabled": True},
+        # Re-fetch mounted secrets and patch synced K8s Secrets every poll
+        # interval (default 2m). Without this, SecretProviderClass changes
+        # never reach an already-created synced Secret.
+        "enableSecretRotation": True,
     },
     opts=pulumi.ResourceOptions(provider=k8s_provider),
 )
