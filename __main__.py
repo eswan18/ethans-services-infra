@@ -752,14 +752,14 @@ bifrost_build = cloudbuild.Trigger(
 pubsub_config = {
     "staging": {
         "topics": {
-            "fitness-events-staging": fitness_api_staging_sa,
+            "footstrike-events-staging": fitness_api_staging_sa,
             "identity-events-staging": identity_staging_sa,
             "asset-events-staging": asset_manager_staging_sa,
             "forecasting-events-staging": forecasting_staging_sa,
         },
         "subscriber_sa": comms_staging_sa,
         "subscriptions": {
-            "comms-staging-fitness-sub": "fitness-events-staging",
+            "comms-staging-footstrike-sub": "footstrike-events-staging",
             "comms-staging-identity-sub": "identity-events-staging",
             "comms-staging-asset-sub": "asset-events-staging",
             "comms-staging-forecasting-sub": "forecasting-events-staging",
@@ -767,14 +767,14 @@ pubsub_config = {
     },
     "prod": {
         "topics": {
-            "fitness-events-prod": fitness_api_prod_sa,
+            "footstrike-events-prod": fitness_api_prod_sa,
             "identity-events-prod": identity_prod_sa,
             "asset-events-prod": asset_manager_prod_sa,
             "forecasting-events-prod": forecasting_prod_sa,
         },
         "subscriber_sa": comms_prod_sa,
         "subscriptions": {
-            "comms-prod-fitness-sub": "fitness-events-prod",
+            "comms-prod-footstrike-sub": "footstrike-events-prod",
             "comms-prod-identity-sub": "identity-events-prod",
             "comms-prod-asset-sub": "asset-events-prod",
             "comms-prod-forecasting-sub": "forecasting-events-prod",
