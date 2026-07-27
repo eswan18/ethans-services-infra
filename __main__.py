@@ -512,6 +512,9 @@ secret_access = {
             "bifrost_prod_oidc_client_id",
             "bifrost_prod_oidc_client_secret",
             "bifrost_prod_session_secret",
+            "bifrost_prod_github_token",
+            "bifrost_prod_neon_api_key",
+            "bifrost_prod_preview_api_token",
         ],
     ),
     "bifrost-staging": (
@@ -607,6 +610,9 @@ secret_names = [
     "bifrost_prod_oidc_client_id",
     "bifrost_prod_oidc_client_secret",
     "bifrost_prod_session_secret",
+    "bifrost_prod_github_token",
+    "bifrost_prod_neon_api_key",
+    "bifrost_prod_preview_api_token",
     # bifrost staging
     "bifrost_staging_oidc_client_id",
     "bifrost_staging_oidc_client_secret",
@@ -1013,6 +1019,32 @@ letsencrypt_dns01_issuer = k8s.apiextensions.CustomResource(
     opts=pulumi.ResourceOptions(
         provider=k8s_provider,
         depends_on=[cert_manager_release, cloudflare_dns_token_secret],
+    ),
+)
+
+# Preview environments: shared namespace holding the wildcard certificate.
+# One cert (not per-preview) — Let's Encrypt's duplicate-certificate limit
+# (5/week per identical name set) would throttle preview creation otherwise.
+# Bifrost copies the secret into each preview namespace at creation time.
+previews_namespace = k8s.core.v1.Namespace(
+    "previews",
+    metadata={"name": "previews"},
+    opts=pulumi.ResourceOptions(provider=k8s_provider),
+)
+
+preview_wildcard_cert = k8s.apiextensions.CustomResource(
+    "preview-wildcard-cert",
+    api_version="cert-manager.io/v1",
+    kind="Certificate",
+    metadata={"name": "preview-footstrike-run-tls", "namespace": "previews"},
+    spec={
+        "secretName": "preview-footstrike-run-tls",
+        "issuerRef": {"name": "letsencrypt-dns01", "kind": "ClusterIssuer"},
+        "dnsNames": ["*.preview.footstrike.run"],
+    },
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[cert_manager_release, previews_namespace],
     ),
 )
 
