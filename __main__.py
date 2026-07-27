@@ -747,6 +747,30 @@ bifrost_build = cloudbuild.Trigger(
     service_account=cloud_build_sa,
 )
 
+# Preview builds: manual-invocation triggers (no push event). Run with
+#   gcloud builds triggers run {repo}-preview-build --branch=<branch>
+# The build config is pinned to main's cloudbuild-preview.yaml; the build
+# *source* is whatever branch the run names. Note RunBuildTrigger accepts
+# no substitutions — preview builds are deliberately substitution-free.
+for preview_repo in ["footstrike-api", "footstrike-dashboard", "identity"]:
+    cloudbuild.Trigger(
+        f"{preview_repo}-preview-build",
+        name=f"{preview_repo}-preview-build",
+        project=project,
+        service_account=cloud_build_sa,
+        source_to_build=cloudbuild.TriggerSourceToBuildArgs(
+            uri=f"https://github.com/{github_owner}/{preview_repo}",
+            ref="refs/heads/main",
+            repo_type="GITHUB",
+        ),
+        git_file_source=cloudbuild.TriggerGitFileSourceArgs(
+            path="cloudbuild-preview.yaml",
+            uri=f"https://github.com/{github_owner}/{preview_repo}",
+            revision="refs/heads/main",
+            repo_type="GITHUB",
+        ),
+    )
+
 # Pub/Sub topics and subscriptions for event-driven notifications
 # One topic per source service per environment; comms subscribes to all of them.
 pubsub_config = {
