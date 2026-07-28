@@ -548,6 +548,25 @@ bifrost_prod_builds_viewer = projects.IAMMember(
     member=bifrost_prod_sa.email.apply(lambda email: f"serviceAccount:{email}"),
 )
 
+# Preview orchestration (prod bifrost only): running a {repo}-preview-build
+# trigger needs cloudbuild.builds.create, which the viewer role above lacks —
+# builds.editor is the narrowest predefined role that grants it. The triggers
+# also pin service_account=cloud_build_sa, so the caller must additionally be
+# allowed to actAs that SA; without the serviceAccountUser binding below, the
+# run fails with a second, less obvious 403.
+bifrost_prod_builds_editor = projects.IAMMember(
+    "bifrost-prod-builds-editor",
+    project=project,
+    role="roles/cloudbuild.builds.editor",
+    member=bifrost_prod_sa.email.apply(lambda email: f"serviceAccount:{email}"),
+)
+bifrost_prod_act_as_cloud_build_sa = serviceaccount.IAMMember(
+    "bifrost-prod-act-as-cloud-build-sa",
+    service_account_id=f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com",
+    role="roles/iam.serviceAccountUser",
+    member=bifrost_prod_sa.email.apply(lambda email: f"serviceAccount:{email}"),
+)
+
 # Secret Manager secrets (structure only - values managed outside Pulumi)
 secret_names = [
     # fitness-api prod
