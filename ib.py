@@ -13,6 +13,10 @@ Usage:
     ib preview up <branch> --no-wait    # Fire and return the tag
     ib preview down <tag>               # Tear down (confirm unless -y/--yes)
 
+    Preview concepts (membership, the registry, the resolution cascade,
+    onboarding a new previewable app) live in bifrost's
+    docs/preview-environments.md, not here -- this is just the CLI surface.
+
 Examples:
     ib status
     ib status footstrike-api
@@ -22,6 +26,14 @@ Examples:
     ib preview up my-feature-branch
     ib preview up my-feature-branch --no-wait
     ib preview down my-feature-branch -y
+
+    # Preview a branch that spans two repos: push the SAME branch name to
+    # each repo whose changes belong together, then bring up one preview.
+    # `up` includes only the repos where that branch actually exists --
+    # anything else in the preview resolves to shared staging.
+    #   (in footstrike-api/)      git push origin my-feature
+    #   (in footstrike-dashboard/) git push origin my-feature
+    ib preview up my-feature
 """
 
 import json
