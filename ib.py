@@ -8,20 +8,35 @@ Usage:
     ib status <app> -q      # Exit 0 if in sync, 1 if not (minimal output)
     ib promote <app>        # Compare staging vs prod, offer to promote
     ib promote <app> -y     # Promote without confirmation
+    ib preview list                     # Table of preview environments
+    ib preview up <branch>              # Create/update, poll to ready, print URLs
+    ib preview up <branch> --no-wait    # Fire and return the tag
+    ib preview down <tag>               # Tear down (confirm unless -y/--yes)
 
 Examples:
     ib status
     ib status footstrike-api
     ib status -q
     ib promote footstrike-dashboard
+    ib preview list
+    ib preview up my-feature-branch
+    ib preview up my-feature-branch --no-wait
+    ib preview down my-feature-branch -y
 """
 
 import json
 import subprocess
 import sys
 import re
+import os
+import time
+import urllib.error
+import urllib.request
 
 REGISTRY = "us-central1-docker.pkg.dev/ethans-services/containers"
+
+BIFROST_URL = os.environ.get("BIFROST_URL", "https://bifrost.ethanswan.com")
+PREVIEW_TOKEN_SECRET = "bifrost_prod_preview_api_token"
 
 SERVICES = [
     "asset-manager",
@@ -41,6 +56,69 @@ def run(cmd: list[str]) -> str:
         print(f"Error: {result.stderr}", file=sys.stderr)
         sys.exit(1)
     return result.stdout.strip()
+
+
+def preview_token() -> str:
+    """Fetch the preview API bearer token from Secret Manager."""
+    return run(
+        [
+            "gcloud",
+            "secrets",
+            "versions",
+            "access",
+            "latest",
+            f"--secret={PREVIEW_TOKEN_SECRET}",
+        ]
+    )
+
+
+def preview_api(method: str, path: str, body: dict | None = None) -> dict:
+    """Call bifrost's preview API. Exits with a clear message on failure."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        f"{BIFROST_URL}{path}",
+        data=data,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {preview_token()}",
+            "Accept": "application/json",
+            # Cloudflare's WAF bans the default "Python-urllib/x.y" signature
+            # outright (error 1010, browser_signature_banned) before the
+            # request ever reaches bifrost -- a real User-Agent is required.
+            "User-Agent": "ib-preview-cli",
+            **({"Content-Type": "application/json"} if data else {}),
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        err_body = e.read()
+        try:
+            detail = json.loads(err_body).get("error", "")
+        except Exception:
+            # Not a JSON body (e.g. a plain-text 404/405 from the router
+            # itself, before it reaches bifrost's handlers) -- fall back to
+            # the raw text rather than printing an empty detail.
+            detail = err_body.decode(errors="replace").strip()
+        if e.code == 503:
+            print(
+                "Preview API unavailable — bifrost has no preview config.",
+                file=sys.stderr,
+            )
+        elif e.code == 409:
+            print(
+                "That preview is busy — another up/down is in flight.", file=sys.stderr
+            )
+        elif e.code == 401:
+            print("Unauthorized — check the preview API token.", file=sys.stderr)
+        else:
+            print(f"Preview API error {e.code}: {detail}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"Cannot reach bifrost at {BIFROST_URL}: {e.reason}", file=sys.stderr)
+        sys.exit(1)
 
 
 def images_from_pods(pods: list[dict]) -> set[str]:
@@ -299,6 +377,70 @@ def validate_app(app: str) -> None:
         sys.exit(1)
 
 
+def preview_list() -> None:
+    previews = preview_api("GET", "/api/previews").get("previews") or []
+    if not previews:
+        print("No preview environments.")
+        return
+    print(f"{'TAG':<24} {'BRANCH':<24} {'PHASE':<10} {'HEALTH':<12} APPS")
+    for p in previews:
+        apps = ",".join(p.get("apps") or [])
+        print(
+            f"{p['tag']:<24} {p['branch']:<24} {p['phase']:<10} {p['health']:<12} {apps}"
+        )
+
+
+def preview_up(branch: str, wait: bool = True) -> None:
+    created = preview_api("POST", "/api/previews", {"branch": branch})
+    tag = created["tag"]
+    print(f"Creating preview {tag} from {branch}...")
+    if not wait:
+        print("Not waiting. Check with: ib preview list")
+        return
+    deadline = time.time() + 30 * 60
+    phase = created.get("phase", "creating")
+    known_phases = {"creating", "ready", "failed", "terminating"}
+    noted_unknown_phase = False
+    while time.time() < deadline:
+        time.sleep(10)
+        rec = preview_api("GET", f"/api/previews/{tag}")
+        if rec["phase"] != phase:
+            phase = rec["phase"]
+            print(f"  {phase}")
+        if phase == "ready":
+            for app, url in sorted((rec.get("urls") or {}).items()):
+                print(f"  {app}: {url}")
+            return
+        if phase == "failed":
+            print(
+                f"Preview {tag} failed (phase: {phase}). "
+                "Check the Previews tab in bifrost for details.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if phase == "terminating":
+            print(
+                f"Preview {tag} is being torn down (concurrent `preview down`?).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if phase not in known_phases and not noted_unknown_phase:
+            print(f"  (unrecognized phase {phase!r}; continuing to poll)")
+            noted_unknown_phase = True
+    print(f"Timed out waiting for {tag}; check `ib preview list`.", file=sys.stderr)
+    sys.exit(1)
+
+
+def preview_down(tag: str, yes: bool = False) -> None:
+    if not yes:
+        answer = input(f"Tear down preview {tag}? [y/N] ").strip().lower()
+        if answer != "y":
+            print("Aborted.")
+            return
+    preview_api("DELETE", f"/api/previews/{tag}")
+    print(f"Tearing down {tag}.")
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(__doc__)
@@ -329,9 +471,35 @@ def main() -> None:
             sys.exit(1)
         validate_app(args[0])
         promote(args[0], yes=yes)
+    elif command == "preview":
+        if len(sys.argv) < 3:
+            print("Usage: ib preview <list|up|down> ...")
+            sys.exit(1)
+        subcommand = sys.argv[2]
+        args = sys.argv[3:]
+        if subcommand == "list":
+            preview_list()
+        elif subcommand == "up":
+            no_wait = "--no-wait" in args
+            args = [a for a in args if a != "--no-wait"]
+            if not args:
+                print("Usage: ib preview up <branch> [--no-wait]")
+                sys.exit(1)
+            preview_up(args[0], wait=not no_wait)
+        elif subcommand == "down":
+            yes = "-y" in args or "--yes" in args
+            args = [a for a in args if a not in ("-y", "--yes")]
+            if not args:
+                print("Usage: ib preview down <tag> [-y/--yes]")
+                sys.exit(1)
+            preview_down(args[0], yes=yes)
+        else:
+            print(f"Unknown preview subcommand: {subcommand}")
+            print("Available subcommands: list, up, down")
+            sys.exit(1)
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: status, promote")
+        print("Available commands: status, promote, preview")
         sys.exit(1)
 
 
