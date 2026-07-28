@@ -399,6 +399,8 @@ def preview_up(branch: str, wait: bool = True) -> None:
         return
     deadline = time.time() + 30 * 60
     phase = created.get("phase", "creating")
+    known_phases = {"creating", "ready", "failed", "terminating"}
+    noted_unknown_phase = False
     while time.time() < deadline:
         time.sleep(10)
         rec = preview_api("GET", f"/api/previews/{tag}")
@@ -416,6 +418,15 @@ def preview_up(branch: str, wait: bool = True) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+        if phase == "terminating":
+            print(
+                f"Preview {tag} is being torn down (concurrent `preview down`?).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if phase not in known_phases and not noted_unknown_phase:
+            print(f"  (unrecognized phase {phase!r}; continuing to poll)")
+            noted_unknown_phase = True
     print(f"Timed out waiting for {tag}; check `ib preview list`.", file=sys.stderr)
     sys.exit(1)
 
