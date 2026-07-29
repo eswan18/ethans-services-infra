@@ -1,4 +1,5 @@
-"""Manual verification for wait_for_preview's rendering (ib.py, Task 3).
+"""Manual verification for wait_for_preview (Task 3) and preview expiry
+rendering (Task 4) in ib.py.
 
 Not wired into CI and not a pytest suite -- this repo has no test harness
 (no tests/ dir, no test framework in pyproject.toml's dependency groups,
@@ -146,5 +147,158 @@ records_naive_ts = [
 out, err, code = run("pr-5", "creating", list(records_naive_ts), is_tty=True)
 assert code is None, "a naive stepSince must not crash the poll loop"
 show("4b. wait_for_preview survives a naive stepSince mid-run", out, err, code)
+
+# 5. Preview expiry rendering (ib.py, Task 4): `expiresAt` absent, a future
+# expiry, and one already past due but not yet reaped (the hourly sweep can
+# lag by up to an hour, so that's an expected state, not a bug).
+no_ttl = {"tag": "pr-10", "branch": "no-ttl", "phase": "ready", "health": "healthy"}
+assert "expiresAt" not in no_ttl
+assert ib.preview_expiry_display(no_ttl) == "-"
+
+# 8h5s in the future -- the few extra seconds are slack against the moment
+# this assertion actually runs, so the result reliably floors to "8h0m"
+# rather than flapping to "7h59m" on a slow tick.
+future_ttl = {
+    "tag": "pr-11",
+    "branch": "future-ttl",
+    "phase": "ready",
+    "health": "healthy",
+    "expiresAt": ts(-(8 * 3600 + 5)),
+}
+assert ib.preview_expiry_display(future_ttl) == "8h0m", ib.preview_expiry_display(
+    future_ttl
+)
+
+past_due_ttl = {
+    "tag": "pr-12",
+    "branch": "past-due",
+    "phase": "ready",
+    "health": "healthy",
+    "expiresAt": ts(3600),  # expired an hour ago, not yet reaped by the sweep
+}
+assert ib.preview_expiry_display(past_due_ttl) == "expired"
+
+print("\n=== 5. preview_expiry_display: absent / future / past-due ===")
+print(f"no expiresAt         -> {ib.preview_expiry_display(no_ttl)!r}")
+print(f"expires in ~8h       -> {ib.preview_expiry_display(future_ttl)!r}")
+print(f"expired ~1h ago      -> {ib.preview_expiry_display(past_due_ttl)!r}")
+
+# Same three cases through the real `preview list` table, so the rendering
+# that actually reaches a user's terminal is what's checked, not just the
+# helper. Drives ib.preview_list via its injectable `previews` seam (same
+# pattern as wait_for_preview's poll/sleep/is_tty) rather than reaching for
+# the network -- no monkeypatching needed.
+canned_previews = [
+    {**no_ttl, "apps": ["footstrike-api"]},
+    {**future_ttl, "apps": ["footstrike-api"]},
+    {**past_due_ttl, "apps": ["footstrike-api"]},
+]
+list_out = io.StringIO()
+with contextlib.redirect_stdout(list_out):
+    ib.preview_list(canned_previews)
+list_output = list_out.getvalue()
+rows = {line.split()[0]: line for line in list_output.splitlines() if line}
+assert "None" not in list_output, "no-TTL row must never render the literal 'None'"
+assert "-" in rows["pr-10"]
+assert "8h0m" in rows["pr-11"]
+assert "expired" in rows["pr-12"]
+print("\n=== 5b. `ib preview list` EXPIRES column, same three cases ===")
+print(list_output)
+
+
+# 6. `ib preview up` argument parsing (Task 4, fix round 1): --ttl must
+# never be silently dropped. A prior version matched only the exact token
+# "--ttl", so "--ttl=8h" (or any other unrecognized token) sat unconsumed
+# in args and was thrown away with no error -- the user asked for an 8h
+# lifetime and silently got a preview that never expires. parse_up_args now
+# requires the leftover args to reduce to exactly one token (the branch);
+# anything else -- including a leftover flag it doesn't recognize -- is a
+# usage error instead of a silent no-op.
+def parse_up(argv_tail: list[str]):
+    out, err = io.StringIO(), io.StringIO()
+    result = None
+    exit_code = None
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            result = ib.parse_up_args(list(argv_tail))
+        except SystemExit as e:
+            exit_code = e.code
+    return result, out.getvalue(), err.getvalue(), exit_code
+
+
+cases = [
+    ("mybranch", "bare branch, no flags"),
+    ("mybranch --ttl 8h", "--ttl 8h (space form)"),
+    ("mybranch --ttl 8h --no-wait", "--ttl 8h --no-wait"),
+    ("mybranch --ttl=8h", "--ttl=8h (unsupported equals form)"),
+    ("mybranch --ttl", "bare --ttl, no value"),
+    ("mybranch --typo=x", "unknown leftover flag"),
+]
+results = {argv: parse_up(argv.split()) for argv, _ in cases}
+
+assert results["mybranch"][0] == (False, None, "mybranch")
+assert results["mybranch --ttl 8h"][0] == (False, "8h", "mybranch")
+assert results["mybranch --ttl 8h --no-wait"][0] == (True, "8h", "mybranch")
+for argv in ("mybranch --ttl=8h", "mybranch --ttl", "mybranch --typo=x"):
+    result, out, _err, code = results[argv]
+    assert result is None and code == 1, (argv, result, code)
+    assert "Usage: ib preview up" in out, (argv, out)
+
+print("\n=== 6. ib preview up argument parsing: --ttl never silently dropped ===")
+for argv, label in cases:
+    result, out, _err, code = results[argv]
+    outcome = result if code is None else f"exit {code}: {out.strip()}"
+    print(f"{label:<36} {argv!r:<32} -> {outcome}")
+
+
+# 7. A --ttl silently dropped by a server that doesn't support it yet (Task
+# 4, fix round 2). Go's json.Decoder ignores unknown request fields by
+# default, and bifrost's handler doesn't set DisallowUnknownFields, so a
+# server that predates `ttl` support accepts the POST, returns success, and
+# creates a preview with no `expiresAt` at all -- no error anywhere. This is
+# not hypothetical: prod bifrost hasn't been promoted with TTL support yet,
+# so today this is exactly what happens. warn_if_ttl_dropped is the
+# client-side check that catches it by comparing what was asked for against
+# what the record actually got. It's a warning, not a failure -- the
+# preview really was created -- so it never calls sys.exit; wrapping the
+# call in the same SystemExit-trapping pattern used elsewhere in this file
+# makes that "still exits 0" guarantee explicit rather than assumed.
+def check_ttl_warning(ttl, record, tag):
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = None
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            ib.warn_if_ttl_dropped(ttl, record, tag)
+        except SystemExit as e:
+            exit_code = e.code
+    return out.getvalue(), err.getvalue(), exit_code
+
+
+# 7a. TTL requested and honored -- expiresAt is on the record -- no warning.
+out, err, code = check_ttl_warning("8h", {"expiresAt": ts(-8 * 3600)}, "pr-30")
+assert err == "", f"honored TTL must not warn, got: {err!r}"
+assert code is None
+show("7a. --ttl requested and honored: no warning, exit unaffected", out, err, code)
+
+# 7b. TTL requested, server silently dropped it (old bifrost) -- warning on
+# stderr naming the likely cause and the consequence, but still exit 0.
+out, err, code = check_ttl_warning("8h", {"tag": "pr-31"}, "pr-31")
+assert "Warning" in err and "pr-31" in err and "8h" in err
+assert "not expire" in err.lower() or "will not expire" in err.lower(), err
+assert code is None, "a dropped TTL is a warning, not a failure -- must not exit"
+show(
+    "7b. --ttl requested but dropped by an old server: warning, exit still 0",
+    out,
+    err,
+    code,
+)
+
+# 7c. No TTL requested -- never warn, regardless of what's on the record
+# (including a preview that happens to carry an expiresAt from a past run).
+out, err, code = check_ttl_warning(None, {"tag": "pr-32"}, "pr-32")
+assert err == ""
+out2, err2, code2 = check_ttl_warning(None, {"expiresAt": ts(-3600)}, "pr-32")
+assert err2 == ""
+show("7c. No --ttl requested: no warning regardless of the record", out, err, code)
 
 print("\nAll scenarios passed.")

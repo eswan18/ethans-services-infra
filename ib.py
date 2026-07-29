@@ -8,14 +8,30 @@ Usage:
     ib status <app> -q      # Exit 0 if in sync, 1 if not (minimal output)
     ib promote <app>        # Compare staging vs prod, offer to promote
     ib promote <app> -y     # Promote without confirmation
-    ib preview list                     # Table of preview environments
+    ib preview list                     # Table of preview environments, TTL remaining
     ib preview up <branch>              # Create/update, show live progress, print URLs
+    ib preview up <branch> --ttl 8h     # Same, but auto-expire (and get reaped) after 8h
     ib preview up <branch> --no-wait    # Fire and return the tag
     ib preview down <tag>               # Tear down (confirm unless -y/--yes)
 
     Preview concepts (membership, the registry, the resolution cascade,
     onboarding a new previewable app) live in bifrost's
     docs/preview-environments.md, not here -- this is just the CLI surface.
+
+    `--ttl` takes a Go duration string like `8h` or `90m`. bifrost owns
+    parsing and validation (rejects a non-positive or unparseable value, or
+    one over the 720h/30-day cap) and its error message is shown verbatim
+    on a bad value -- this CLI does not re-validate it. Expiry is opt-in:
+    omitting `--ttl`, including on a re-run of `up` for an existing
+    preview, means the preview never expires, and a bare re-run clears a
+    TTL set earlier. `preview list` shows the remaining time per preview,
+    `-` for one with no TTL, and `expired` for one whose TTL has passed but
+    hasn't been reaped yet by bifrost's hourly sweep (up to an hour of lag
+    is normal, not a bug). If `--ttl` was requested but the created preview
+    comes back with no expiry -- e.g. an older bifrost that predates `ttl`
+    support and silently ignores the field -- `preview up` prints a warning
+    to stderr and still exits 0: the preview was created and is usable,
+    just without the lifetime that was asked for.
 
     `preview up` polls every 3s while a preview is being created. On a
     terminal it redraws a single line with a spinner, the current build
@@ -31,6 +47,7 @@ Examples:
     ib promote footstrike-dashboard
     ib preview list
     ib preview up my-feature-branch
+    ib preview up my-feature-branch --ttl 8h
     ib preview up my-feature-branch --no-wait
     ib preview down my-feature-branch -y
 
@@ -397,16 +414,68 @@ def validate_app(app: str) -> None:
         sys.exit(1)
 
 
-def preview_list() -> None:
-    previews = preview_api("GET", "/api/previews").get("previews") or []
+def format_ttl_remaining(expires_at: datetime, now: datetime | None = None) -> str:
+    """Render time remaining until `expires_at`, like '8h0m' or '3d2h'.
+
+    bifrost's sweep for reaping past-due previews runs hourly, so a preview
+    can sit expired-but-alive for up to an hour -- that's rendered as
+    'expired' rather than a misleading negative duration.
+    """
+    now = now or datetime.now(timezone.utc)
+    remaining = (expires_at - now).total_seconds()
+    if remaining <= 0:
+        return "expired"
+    total_minutes = int(remaining // 60)
+    if total_minutes < 1:
+        return "<1m"
+    days, rem_minutes = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(rem_minutes, 60)
+    if days:
+        return f"{days}d{hours}h"
+    if hours:
+        return f"{hours}h{minutes}m"
+    return f"{minutes}m"
+
+
+def preview_expiry_display(p: dict) -> str:
+    """Remaining-TTL cell for a `preview list` row.
+
+    `expiresAt` is `omitzero` server-side, so it's plain *absent* (never ""
+    or null) on a preview with no TTL -- `.get()` with a default renders
+    that as '-', never the string 'None'. Also falls back to '-' on a
+    malformed or timezone-naive timestamp instead of raising, same
+    tolerance `parse_rfc3339`/`step_elapsed_seconds` already have.
+    """
+    expires_at = p.get("expiresAt")
+    if not expires_at:
+        return "-"
+    try:
+        return format_ttl_remaining(parse_rfc3339(expires_at))
+    except (ValueError, TypeError):
+        return "-"
+
+
+def preview_list(previews: list[dict] | None = None) -> None:
+    """Print the preview table.
+
+    `previews` is normally fetched live; overridable so callers (tests) can
+    drive rendering off canned records instead of the real API -- same
+    seam pattern as `wait_for_preview`'s `poll`/`sleep`/`is_tty`.
+    """
+    if previews is None:
+        previews = preview_api("GET", "/api/previews").get("previews") or []
     if not previews:
         print("No preview environments.")
         return
-    print(f"{'TAG':<24} {'BRANCH':<24} {'PHASE':<10} {'HEALTH':<12} APPS")
+    print(
+        f"{'TAG':<24} {'BRANCH':<24} {'PHASE':<10} {'HEALTH':<12} {'EXPIRES':<10} APPS"
+    )
     for p in previews:
         apps = ",".join(p.get("apps") or [])
+        expires = preview_expiry_display(p)
         print(
-            f"{p['tag']:<24} {p['branch']:<24} {p['phase']:<10} {p['health']:<12} {apps}"
+            f"{p['tag']:<24} {p['branch']:<24} {p['phase']:<10} {p['health']:<12} "
+            f"{expires:<10} {apps}"
         )
 
 
@@ -591,14 +660,84 @@ def wait_for_preview(
     sys.exit(1)
 
 
-def preview_up(branch: str, wait: bool = True) -> None:
-    created = preview_api("POST", "/api/previews", {"branch": branch})
+def warn_if_ttl_dropped(ttl: str | None, record: dict, tag: str) -> None:
+    """Warn on stderr if a requested TTL didn't make it into the server's record.
+
+    Go's json.Decoder ignores unknown request fields by default, and
+    bifrost's handler doesn't set DisallowUnknownFields -- so a server that
+    predates `ttl` support accepts the field, returns success, and creates
+    a preview with no `expiresAt` at all. No error anywhere; the only place
+    left to catch it is here, by checking whether the field the user asked
+    for actually shows up on the record. Deliberately not an error: the
+    preview really was created and is usable, just without the expiry that
+    was requested, so this never raises SystemExit or changes the exit
+    code.
+    """
+    if ttl is None or record.get("expiresAt"):
+        return
+    print(
+        f"Warning: --ttl {ttl} was requested for {tag}, but the preview has "
+        "no expiry and will NOT expire automatically. This bifrost may "
+        "predate --ttl support and silently ignored it. Tear it down "
+        f"manually when done: ib preview down {tag}",
+        file=sys.stderr,
+    )
+
+
+def preview_up(branch: str, wait: bool = True, ttl: str | None = None) -> None:
+    body: dict = {"branch": branch}
+    if ttl is not None:
+        # Sent through verbatim whenever --ttl was given at all -- even an
+        # explicit empty string. bifrost owns parsing/validation of the
+        # duration string and its 400 error message is what the caller sees
+        # on a bad value (see preview_api's error handling); a deliberately
+        # empty value should get the same server-owned 400 as any other bad
+        # value, not be silently treated the same as omitting --ttl.
+        body["ttl"] = ttl
+    created = preview_api("POST", "/api/previews", body)
     tag = created["tag"]
     print(f"Creating preview {tag} from {branch}...")
     if not wait:
+        # No poll loop to piggyback a TTL check on here, so this does one
+        # extra GET instead of skipping verification -- a --ttl silently
+        # dropped by an old server (see warn_if_ttl_dropped) is exactly the
+        # kind of thing a --no-wait/CI caller is least likely to notice on
+        # their own, and a single request is cheap next to the POST that
+        # already just ran.
+        record = preview_api("GET", f"/api/previews/{tag}")
+        warn_if_ttl_dropped(ttl, record, tag)
         print("Not waiting. Check with: ib preview list")
         return
-    wait_for_preview(tag, created.get("phase", "creating"))
+    record = wait_for_preview(tag, created.get("phase", "creating"))
+    warn_if_ttl_dropped(ttl, record, tag)
+
+
+def parse_up_args(args: list[str]) -> tuple[bool, str | None, str]:
+    """Parse the arguments after `ib preview up`. Returns (no_wait, ttl, branch).
+
+    Exits with a usage message unless what's left after pulling out
+    `--no-wait` and `--ttl <value>` reduces to exactly one token (the
+    branch). That's deliberate, not just a missing-branch check: it's also
+    what catches a leftover unrecognized token -- an `--ttl=8h` (this file
+    doesn't parse the equals form) or any typo'd flag -- which would
+    otherwise sit unconsumed in `args` and get silently dropped, leaving
+    the TTL the user asked for silently ignored and the preview created
+    with no expiry at all.
+    """
+    no_wait = "--no-wait" in args
+    args = [a for a in args if a != "--no-wait"]
+    ttl = None
+    if "--ttl" in args:
+        idx = args.index("--ttl")
+        if idx + 1 >= len(args):
+            print("Usage: ib preview up <branch> [--ttl <duration>] [--no-wait]")
+            sys.exit(1)
+        ttl = args[idx + 1]
+        del args[idx : idx + 2]
+    if len(args) != 1:
+        print("Usage: ib preview up <branch> [--ttl <duration>] [--no-wait]")
+        sys.exit(1)
+    return no_wait, ttl, args[0]
 
 
 def preview_down(tag: str, yes: bool = False) -> None:
@@ -650,12 +789,8 @@ def main() -> None:
         if subcommand == "list":
             preview_list()
         elif subcommand == "up":
-            no_wait = "--no-wait" in args
-            args = [a for a in args if a != "--no-wait"]
-            if not args:
-                print("Usage: ib preview up <branch> [--no-wait]")
-                sys.exit(1)
-            preview_up(args[0], wait=not no_wait)
+            no_wait, ttl, branch = parse_up_args(args)
+            preview_up(branch, wait=not no_wait, ttl=ttl)
         elif subcommand == "down":
             yes = "-y" in args or "--yes" in args
             args = [a for a in args if a not in ("-y", "--yes")]
