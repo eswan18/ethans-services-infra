@@ -12,6 +12,7 @@ Usage:
     ib preview up <branch>              # Create/update, show live progress, print URLs
     ib preview up <branch> --ttl 8h     # Same, but auto-expire (and get reaped) after 8h
     ib preview up <branch> --no-wait    # Fire and return the tag
+    ib preview up <branch> --auto-update  # Same, but redeploy automatically when the branch moves
     ib preview down <tag>               # Tear down (confirm unless -y/--yes)
 
     Preview concepts (membership, the registry, the resolution cascade,
@@ -33,6 +34,20 @@ Usage:
     to stderr and still exits 0: the preview was created and is usable,
     just without the lifetime that was asked for.
 
+    `--auto-update` opts a preview into bifrost's watcher: every 2 minutes
+    it checks whether the preview's branch has moved and, if so, redeploys
+    it -- exactly what a manual `ib preview up <branch>` does, just on a
+    timer. It's opt-in on purpose: a redeploy rebuilds every member of the
+    preview, and a failing build marks a previously-working preview
+    `failed`. Composes with `--ttl` and `--no-wait` in any order. `preview
+    list` marks an auto-updating preview with a `✓` in the AUTO column; one
+    without it renders `-`, same convention as EXPIRES. If `--auto-update`
+    was requested but the created preview comes back without the flag --
+    e.g. an older bifrost that predates `autoUpdate` support and silently
+    ignores the field -- `preview up` prints a warning to stderr and still
+    exits 0: the preview was created and is usable, it just won't follow
+    the branch on its own.
+
     `preview up` polls every 3s while a preview is being created. On a
     terminal it redraws a single line with a spinner, the current build
     step, and elapsed time; piped or redirected output (CI logs, `| tee`)
@@ -49,6 +64,8 @@ Examples:
     ib preview up my-feature-branch
     ib preview up my-feature-branch --ttl 8h
     ib preview up my-feature-branch --no-wait
+    ib preview up my-feature-branch --auto-update
+    ib preview up my-feature-branch --ttl 8h --auto-update --no-wait
     ib preview down my-feature-branch -y
 
     # Preview a branch that spans two repos: push the SAME branch name to
@@ -455,6 +472,17 @@ def preview_expiry_display(p: dict) -> str:
         return "-"
 
 
+def preview_auto_update_display(p: dict) -> str:
+    """AUTO column for a `preview list` row.
+
+    `autoUpdate` is `omitempty` server-side, so it's plain *absent* (never
+    `false` or null) on a preview that doesn't have it enabled -- `.get()`
+    with a default renders that as '-', never the string 'False'. Same
+    tolerance pattern as `preview_expiry_display`/EXPIRES.
+    """
+    return "✓" if p.get("autoUpdate", False) else "-"
+
+
 def preview_list(previews: list[dict] | None = None) -> None:
     """Print the preview table.
 
@@ -468,14 +496,16 @@ def preview_list(previews: list[dict] | None = None) -> None:
         print("No preview environments.")
         return
     print(
-        f"{'TAG':<24} {'BRANCH':<24} {'PHASE':<10} {'HEALTH':<12} {'EXPIRES':<10} APPS"
+        f"{'TAG':<24} {'BRANCH':<24} {'PHASE':<10} {'HEALTH':<12} {'EXPIRES':<10} "
+        f"{'AUTO':<5} APPS"
     )
     for p in previews:
         apps = ",".join(p.get("apps") or [])
         expires = preview_expiry_display(p)
+        auto = preview_auto_update_display(p)
         print(
             f"{p['tag']:<24} {p['branch']:<24} {p['phase']:<10} {p['health']:<12} "
-            f"{expires:<10} {apps}"
+            f"{expires:<10} {auto:<5} {apps}"
         )
 
 
@@ -684,7 +714,41 @@ def warn_if_ttl_dropped(ttl: str | None, record: dict, tag: str) -> None:
     )
 
 
-def preview_up(branch: str, wait: bool = True, ttl: str | None = None) -> None:
+def warn_if_auto_update_dropped(
+    auto_update: bool, record: dict, tag: str, branch: str
+) -> None:
+    """Warn on stderr if a requested auto-update didn't make it into the server's record.
+
+    Same failure mode as warn_if_ttl_dropped, and a sibling rather than a
+    shared helper because the message content differs (what didn't take
+    effect, and the consequence): Go's json.Decoder ignores unknown request
+    fields by default, and bifrost's handler doesn't set
+    DisallowUnknownFields -- so a server that predates `autoUpdate` support
+    accepts the field, returns success, and creates a preview with no
+    `autoUpdate` key at all. It's `omitempty` on the record, so absence
+    means off, same as `.get()`'s default here. Deliberately not an error:
+    the preview really was created and is usable, it just won't follow the
+    branch on its own, so this never raises SystemExit or changes the exit
+    code.
+    """
+    if not auto_update or record.get("autoUpdate"):
+        return
+    print(
+        f"Warning: --auto-update was requested for {tag}, but the preview "
+        "has no autoUpdate flag and will NOT follow the branch. This "
+        "bifrost may predate --auto-update support and silently ignored "
+        "it. Re-run manually to pick up new commits: "
+        f"ib preview up {branch} --auto-update",
+        file=sys.stderr,
+    )
+
+
+def preview_up(
+    branch: str,
+    wait: bool = True,
+    ttl: str | None = None,
+    auto_update: bool = False,
+) -> None:
     body: dict = {"branch": branch}
     if ttl is not None:
         # Sent through verbatim whenever --ttl was given at all -- even an
@@ -694,50 +758,65 @@ def preview_up(branch: str, wait: bool = True, ttl: str | None = None) -> None:
         # empty value should get the same server-owned 400 as any other bad
         # value, not be silently treated the same as omitting --ttl.
         body["ttl"] = ttl
+    if auto_update:
+        # Only ever sent as `true` -- the contract wants the key entirely
+        # absent when the flag isn't given (mirrors the record's own
+        # `omitempty`), never an explicit `"autoUpdate": false`.
+        body["autoUpdate"] = True
     created = preview_api("POST", "/api/previews", body)
     tag = created["tag"]
     print(f"Creating preview {tag} from {branch}...")
     if not wait:
-        # No poll loop to piggyback a TTL check on here, so this does one
-        # extra GET instead of skipping verification -- a --ttl silently
-        # dropped by an old server (see warn_if_ttl_dropped) is exactly the
-        # kind of thing a --no-wait/CI caller is least likely to notice on
-        # their own, and a single request is cheap next to the POST that
-        # already just ran.
+        # No poll loop to piggyback a TTL/auto-update check on here, so
+        # this does one extra GET instead of skipping verification -- a
+        # flag silently dropped by an old server (see warn_if_ttl_dropped /
+        # warn_if_auto_update_dropped) is exactly the kind of thing a
+        # --no-wait/CI caller is least likely to notice on their own, and a
+        # single request is cheap next to the POST that already just ran.
         record = preview_api("GET", f"/api/previews/{tag}")
         warn_if_ttl_dropped(ttl, record, tag)
+        warn_if_auto_update_dropped(auto_update, record, tag, branch)
         print("Not waiting. Check with: ib preview list")
         return
     record = wait_for_preview(tag, created.get("phase", "creating"))
     warn_if_ttl_dropped(ttl, record, tag)
+    warn_if_auto_update_dropped(auto_update, record, tag, branch)
 
 
-def parse_up_args(args: list[str]) -> tuple[bool, str | None, str]:
-    """Parse the arguments after `ib preview up`. Returns (no_wait, ttl, branch).
+USAGE_PREVIEW_UP = (
+    "Usage: ib preview up <branch> [--ttl <duration>] [--no-wait] [--auto-update]"
+)
+
+
+def parse_up_args(args: list[str]) -> tuple[bool, str | None, bool, str]:
+    """Parse the arguments after `ib preview up`. Returns (no_wait, ttl, auto_update, branch).
 
     Exits with a usage message unless what's left after pulling out
-    `--no-wait` and `--ttl <value>` reduces to exactly one token (the
-    branch). That's deliberate, not just a missing-branch check: it's also
-    what catches a leftover unrecognized token -- an `--ttl=8h` (this file
-    doesn't parse the equals form) or any typo'd flag -- which would
-    otherwise sit unconsumed in `args` and get silently dropped, leaving
-    the TTL the user asked for silently ignored and the preview created
-    with no expiry at all.
+    `--no-wait`, `--auto-update`, and `--ttl <value>` reduces to exactly
+    one token (the branch). That's deliberate, not just a missing-branch
+    check: it's also what catches a leftover unrecognized token -- an
+    `--ttl=8h` or `--auto-update=true` (this file doesn't parse the equals
+    form) or any typo'd flag -- which would otherwise sit unconsumed in
+    `args` and get silently dropped, leaving the flag the user asked for
+    silently ignored (a TTL that never got set, or an auto-update that
+    never got enabled).
     """
     no_wait = "--no-wait" in args
     args = [a for a in args if a != "--no-wait"]
+    auto_update = "--auto-update" in args
+    args = [a for a in args if a != "--auto-update"]
     ttl = None
     if "--ttl" in args:
         idx = args.index("--ttl")
         if idx + 1 >= len(args):
-            print("Usage: ib preview up <branch> [--ttl <duration>] [--no-wait]")
+            print(USAGE_PREVIEW_UP)
             sys.exit(1)
         ttl = args[idx + 1]
         del args[idx : idx + 2]
     if len(args) != 1:
-        print("Usage: ib preview up <branch> [--ttl <duration>] [--no-wait]")
+        print(USAGE_PREVIEW_UP)
         sys.exit(1)
-    return no_wait, ttl, args[0]
+    return no_wait, ttl, auto_update, args[0]
 
 
 def preview_down(tag: str, yes: bool = False) -> None:
@@ -789,8 +868,8 @@ def main() -> None:
         if subcommand == "list":
             preview_list()
         elif subcommand == "up":
-            no_wait, ttl, branch = parse_up_args(args)
-            preview_up(branch, wait=not no_wait, ttl=ttl)
+            no_wait, ttl, auto_update, branch = parse_up_args(args)
+            preview_up(branch, wait=not no_wait, ttl=ttl, auto_update=auto_update)
         elif subcommand == "down":
             yes = "-y" in args or "--yes" in args
             args = [a for a in args if a not in ("-y", "--yes")]

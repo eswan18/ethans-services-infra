@@ -1,5 +1,5 @@
-"""Manual verification for wait_for_preview (Task 3) and preview expiry
-rendering (Task 4) in ib.py.
+"""Manual verification for wait_for_preview (Task 3), preview expiry
+rendering (Task 4), and `--auto-update` (Task 5) in ib.py.
 
 Not wired into CI and not a pytest suite -- this repo has no test harness
 (no tests/ dir, no test framework in pyproject.toml's dependency groups,
@@ -206,14 +206,17 @@ print("\n=== 5b. `ib preview list` EXPIRES column, same three cases ===")
 print(list_output)
 
 
-# 6. `ib preview up` argument parsing (Task 4, fix round 1): --ttl must
-# never be silently dropped. A prior version matched only the exact token
-# "--ttl", so "--ttl=8h" (or any other unrecognized token) sat unconsumed
-# in args and was thrown away with no error -- the user asked for an 8h
-# lifetime and silently got a preview that never expires. parse_up_args now
-# requires the leftover args to reduce to exactly one token (the branch);
-# anything else -- including a leftover flag it doesn't recognize -- is a
-# usage error instead of a silent no-op.
+# 6. `ib preview up` argument parsing (Task 4, fix round 1; extended for
+# Task 5's --auto-update): --ttl and --auto-update must never be silently
+# dropped. A prior version matched only the exact token "--ttl", so
+# "--ttl=8h" (or any other unrecognized token) sat unconsumed in args and
+# was thrown away with no error -- the user asked for an 8h lifetime and
+# silently got a preview that never expires. parse_up_args now requires the
+# leftover args to reduce to exactly one token (the branch); anything else
+# -- including a leftover flag it doesn't recognize, like --auto-update=true
+# -- is a usage error instead of a silent no-op. Also exercises --auto-update
+# combined with --ttl and --no-wait in more than one argv order, since
+# parse_up_args strips flags independently of position.
 def parse_up(argv_tail: list[str]):
     out, err = io.StringIO(), io.StringIO()
     result = None
@@ -230,25 +233,55 @@ cases = [
     ("mybranch", "bare branch, no flags"),
     ("mybranch --ttl 8h", "--ttl 8h (space form)"),
     ("mybranch --ttl 8h --no-wait", "--ttl 8h --no-wait"),
+    ("mybranch --auto-update", "--auto-update alone"),
+    (
+        "mybranch --ttl 8h --auto-update --no-wait",
+        "--ttl 8h --auto-update --no-wait",
+    ),
+    (
+        "mybranch --no-wait --auto-update --ttl 8h",
+        "--no-wait --auto-update --ttl 8h (different order)",
+    ),
     ("mybranch --ttl=8h", "--ttl=8h (unsupported equals form)"),
     ("mybranch --ttl", "bare --ttl, no value"),
     ("mybranch --typo=x", "unknown leftover flag"),
+    ("mybranch --auto-update=true", "--auto-update=true (unsupported equals form)"),
 ]
 results = {argv: parse_up(argv.split()) for argv, _ in cases}
 
-assert results["mybranch"][0] == (False, None, "mybranch")
-assert results["mybranch --ttl 8h"][0] == (False, "8h", "mybranch")
-assert results["mybranch --ttl 8h --no-wait"][0] == (True, "8h", "mybranch")
-for argv in ("mybranch --ttl=8h", "mybranch --ttl", "mybranch --typo=x"):
+assert results["mybranch"][0] == (False, None, False, "mybranch")
+assert results["mybranch --ttl 8h"][0] == (False, "8h", False, "mybranch")
+assert results["mybranch --ttl 8h --no-wait"][0] == (True, "8h", False, "mybranch")
+assert results["mybranch --auto-update"][0] == (False, None, True, "mybranch")
+assert results["mybranch --ttl 8h --auto-update --no-wait"][0] == (
+    True,
+    "8h",
+    True,
+    "mybranch",
+)
+assert results["mybranch --no-wait --auto-update --ttl 8h"][0] == (
+    True,
+    "8h",
+    True,
+    "mybranch",
+)
+for argv in (
+    "mybranch --ttl=8h",
+    "mybranch --ttl",
+    "mybranch --typo=x",
+    "mybranch --auto-update=true",
+):
     result, out, _err, code = results[argv]
     assert result is None and code == 1, (argv, result, code)
     assert "Usage: ib preview up" in out, (argv, out)
 
-print("\n=== 6. ib preview up argument parsing: --ttl never silently dropped ===")
+print(
+    "\n=== 6. ib preview up argument parsing: --ttl/--auto-update never silently dropped ==="
+)
 for argv, label in cases:
     result, out, _err, code = results[argv]
     outcome = result if code is None else f"exit {code}: {out.strip()}"
-    print(f"{label:<36} {argv!r:<32} -> {outcome}")
+    print(f"{label:<48} {argv!r:<44} -> {outcome}")
 
 
 # 7. A --ttl silently dropped by a server that doesn't support it yet (Task
@@ -300,5 +333,100 @@ assert err == ""
 out2, err2, code2 = check_ttl_warning(None, {"expiresAt": ts(-3600)}, "pr-32")
 assert err2 == ""
 show("7c. No --ttl requested: no warning regardless of the record", out, err, code)
+
+
+# 8. `autoUpdate` rendering in `ib preview list` (Task 5): the key is
+# `omitempty` server-side, so it's absent -- never `False` -- on a preview
+# that doesn't have it enabled. Same tolerance pattern as `expiresAt`/
+# EXPIRES (section 5/5b above), checked both via the helper directly and
+# through the real `preview list` table.
+no_auto_update = {**no_ttl, "apps": ["footstrike-api"]}
+assert "autoUpdate" not in no_auto_update
+assert ib.preview_auto_update_display(no_auto_update) == "-"
+
+with_auto_update = {**future_ttl, "autoUpdate": True, "apps": ["footstrike-api"]}
+assert ib.preview_auto_update_display(with_auto_update) == "✓"
+
+auto_list_out = io.StringIO()
+with contextlib.redirect_stdout(auto_list_out):
+    ib.preview_list([no_auto_update, with_auto_update])
+auto_list_output = auto_list_out.getvalue()
+auto_rows = {line.split()[0]: line for line in auto_list_output.splitlines() if line}
+assert "False" not in auto_list_output and "None" not in auto_list_output, (
+    "an absent autoUpdate must never render as 'False' or 'None'"
+)
+assert "✓" not in auto_rows["pr-10"]
+assert "✓" in auto_rows["pr-11"]
+print("\n=== 8. `ib preview list` AUTO column: autoUpdate absent vs enabled ===")
+print(auto_list_output)
+
+
+# 9. A --auto-update silently dropped by a server that doesn't support it
+# yet (Task 5) -- same failure mode as warn_if_ttl_dropped (section 7
+# above): Go's json.Decoder ignores unknown request fields by default, so a
+# server that predates `autoUpdate` support accepts the POST, returns
+# success, and creates a preview with no `autoUpdate` key at all -- no
+# error anywhere. warn_if_auto_update_dropped is the client-side check that
+# catches it, mirroring warn_if_ttl_dropped's shape as a sibling rather
+# than a shared helper (the message content -- what didn't take effect and
+# the consequence -- is specific to auto-update). It's a warning, not a
+# failure, so it must never call sys.exit.
+def check_auto_update_warning(auto_update, record, tag, branch):
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = None
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            ib.warn_if_auto_update_dropped(auto_update, record, tag, branch)
+        except SystemExit as e:
+            exit_code = e.code
+    return out.getvalue(), err.getvalue(), exit_code
+
+
+# 9a. Requested and honored -- autoUpdate: true on the record -- no warning.
+out, err, code = check_auto_update_warning(
+    True, {"autoUpdate": True}, "pr-40", "my-branch"
+)
+assert err == "", f"honored auto-update must not warn, got: {err!r}"
+assert code is None
+show(
+    "9a. --auto-update requested and honored: no warning, exit unaffected",
+    out,
+    err,
+    code,
+)
+
+# 9b. Requested, server silently dropped it (old bifrost) -- warning on
+# stderr naming the likely cause and the consequence (won't follow the
+# branch), but still exit 0.
+out, err, code = check_auto_update_warning(True, {"tag": "pr-41"}, "pr-41", "my-branch")
+assert "Warning" in err and "pr-41" in err and "--auto-update" in err
+assert "not follow the branch" in err.lower() or "will not follow" in err.lower(), err
+assert code is None, (
+    "a dropped auto-update is a warning, not a failure -- must not exit"
+)
+show(
+    "9b. --auto-update requested but dropped by an old server: warning, exit still 0",
+    out,
+    err,
+    code,
+)
+
+# 9c. Not requested -- never warn, regardless of what's on the record
+# (including a preview that happens to carry autoUpdate: true from a past
+# run, e.g. one created earlier and re-`up`'d without the flag this time).
+out, err, code = check_auto_update_warning(
+    False, {"tag": "pr-42"}, "pr-42", "my-branch"
+)
+assert err == ""
+out2, err2, code2 = check_auto_update_warning(
+    False, {"autoUpdate": True}, "pr-42", "my-branch"
+)
+assert err2 == ""
+show(
+    "9c. No --auto-update requested: no warning regardless of the record",
+    out,
+    err,
+    code,
+)
 
 print("\nAll scenarios passed.")
