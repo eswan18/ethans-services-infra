@@ -1,4 +1,5 @@
-"""Manual verification for wait_for_preview's rendering (ib.py, Task 3).
+"""Manual verification for wait_for_preview (Task 3) and preview expiry
+rendering (Task 4) in ib.py.
 
 Not wired into CI and not a pytest suite -- this repo has no test harness
 (no tests/ dir, no test framework in pyproject.toml's dependency groups,
@@ -146,5 +147,62 @@ records_naive_ts = [
 out, err, code = run("pr-5", "creating", list(records_naive_ts), is_tty=True)
 assert code is None, "a naive stepSince must not crash the poll loop"
 show("4b. wait_for_preview survives a naive stepSince mid-run", out, err, code)
+
+# 5. Preview expiry rendering (ib.py, Task 4): `expiresAt` absent, a future
+# expiry, and one already past due but not yet reaped (the hourly sweep can
+# lag by up to an hour, so that's an expected state, not a bug).
+no_ttl = {"tag": "pr-10", "branch": "no-ttl", "phase": "ready", "health": "healthy"}
+assert "expiresAt" not in no_ttl
+assert ib.preview_expiry_display(no_ttl) == "-"
+
+# 8h5s in the future -- the few extra seconds are slack against the moment
+# this assertion actually runs, so the result reliably floors to "8h0m"
+# rather than flapping to "7h59m" on a slow tick.
+future_ttl = {
+    "tag": "pr-11",
+    "branch": "future-ttl",
+    "phase": "ready",
+    "health": "healthy",
+    "expiresAt": ts(-(8 * 3600 + 5)),
+}
+assert ib.preview_expiry_display(future_ttl) == "8h0m", ib.preview_expiry_display(
+    future_ttl
+)
+
+past_due_ttl = {
+    "tag": "pr-12",
+    "branch": "past-due",
+    "phase": "ready",
+    "health": "healthy",
+    "expiresAt": ts(3600),  # expired an hour ago, not yet reaped by the sweep
+}
+assert ib.preview_expiry_display(past_due_ttl) == "expired"
+
+print("\n=== 5. preview_expiry_display: absent / future / past-due ===")
+print(f"no expiresAt         -> {ib.preview_expiry_display(no_ttl)!r}")
+print(f"expires in ~8h       -> {ib.preview_expiry_display(future_ttl)!r}")
+print(f"expired ~1h ago      -> {ib.preview_expiry_display(past_due_ttl)!r}")
+
+# Same three cases through the real `preview list` table, so the rendering
+# that actually reaches a user's terminal is what's checked, not just the
+# helper. Drives ib.preview_list via its injectable `previews` seam (same
+# pattern as wait_for_preview's poll/sleep/is_tty) rather than reaching for
+# the network -- no monkeypatching needed.
+canned_previews = [
+    {**no_ttl, "apps": ["footstrike-api"]},
+    {**future_ttl, "apps": ["footstrike-api"]},
+    {**past_due_ttl, "apps": ["footstrike-api"]},
+]
+list_out = io.StringIO()
+with contextlib.redirect_stdout(list_out):
+    ib.preview_list(canned_previews)
+list_output = list_out.getvalue()
+rows = {line.split()[0]: line for line in list_output.splitlines() if line}
+assert "None" not in list_output, "no-TTL row must never render the literal 'None'"
+assert "-" in rows["pr-10"]
+assert "8h0m" in rows["pr-11"]
+assert "expired" in rows["pr-12"]
+print("\n=== 5b. `ib preview list` EXPIRES column, same three cases ===")
+print(list_output)
 
 print("\nAll scenarios passed.")
