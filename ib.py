@@ -447,13 +447,17 @@ def step_elapsed_seconds(step_since: str | None, fallback_start: float) -> float
     Prefers the server's `stepSince`, recomputed fresh against wall-clock
     time on every call (never cached) so the number doesn't go stale
     between polls. Falls back to a locally-tracked start time if
-    `stepSince` is missing or unparseable.
+    `stepSince` is missing, malformed (ValueError), or -- though bifrost
+    should always emit an offset -- timezone-naive (TypeError, from
+    subtracting it against an aware `now`). A naive timestamp is treated
+    as unusable rather than silently assumed to be UTC, same as any other
+    malformed input.
     """
     if step_since:
         try:
             started = parse_rfc3339(step_since)
             return (datetime.now(timezone.utc) - started).total_seconds()
-        except ValueError:
+        except (ValueError, TypeError):
             pass
     return time.time() - fallback_start
 
@@ -555,6 +559,11 @@ def wait_for_preview(
                 print(f"  {app}: {url}")
             return rec
         if new_phase == "failed":
+            # Deliberate: unlike the `step is None` branch above, we don't
+            # also print a bare "  failed" stdout line here. When step-level
+            # detail exists, the richer "failed while <step>: <error>"
+            # message below is strictly more useful and a generic phase
+            # line would just be redundant noise ahead of it.
             tty_clear()
             err = rec.get("error")
             fail_step = rec.get("step")
