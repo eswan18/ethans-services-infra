@@ -9,13 +9,20 @@ Usage:
     ib promote <app>        # Compare staging vs prod, offer to promote
     ib promote <app> -y     # Promote without confirmation
     ib preview list                     # Table of preview environments
-    ib preview up <branch>              # Create/update, poll to ready, print URLs
+    ib preview up <branch>              # Create/update, show live progress, print URLs
     ib preview up <branch> --no-wait    # Fire and return the tag
     ib preview down <tag>               # Tear down (confirm unless -y/--yes)
 
     Preview concepts (membership, the registry, the resolution cascade,
     onboarding a new previewable app) live in bifrost's
     docs/preview-environments.md, not here -- this is just the CLI surface.
+
+    `preview up` polls every 3s while a preview is being created. On a
+    terminal it redraws a single line with a spinner, the current build
+    step, and elapsed time; piped or redirected output (CI logs, `| tee`)
+    instead prints one plain line per step, no spinner or carriage returns.
+    Against an older bifrost that doesn't report steps yet, it falls back
+    to printing only on phase changes.
 
 Examples:
     ib status
@@ -44,6 +51,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 
 REGISTRY = "us-central1-docker.pkg.dev/ethans-services/containers"
 
@@ -402,6 +410,178 @@ def preview_list() -> None:
         )
 
 
+SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+def spinner_frame(tick: int) -> str:
+    """The spinner glyph for poll tick `tick` (cycles through SPINNER_FRAMES)."""
+    return SPINNER_FRAMES[tick % len(SPINNER_FRAMES)]
+
+
+def format_elapsed(seconds: float) -> str:
+    """Render a non-negative second count like '47s' or '2m03s'."""
+    total = max(0, int(seconds))
+    if total < 60:
+        return f"{total}s"
+    minutes, secs = divmod(total, 60)
+    return f"{minutes}m{secs:02d}s"
+
+
+def parse_rfc3339(ts: str) -> datetime:
+    """Parse an RFC3339 timestamp like bifrost's `stepSince` field.
+
+    Tolerates a trailing 'Z' (UTC) and sub-microsecond fractional seconds --
+    Go can emit nanosecond precision, but datetime.fromisoformat tops out at
+    microseconds.
+    """
+    s = ts.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    s = re.sub(r"(\.\d{6})\d+", r"\1", s)
+    return datetime.fromisoformat(s)
+
+
+def step_elapsed_seconds(step_since: str | None, fallback_start: float) -> float:
+    """Seconds elapsed in the current step.
+
+    Prefers the server's `stepSince`, recomputed fresh against wall-clock
+    time on every call (never cached) so the number doesn't go stale
+    between polls. Falls back to a locally-tracked start time if
+    `stepSince` is missing or unparseable.
+    """
+    if step_since:
+        try:
+            started = parse_rfc3339(step_since)
+            return (datetime.now(timezone.utc) - started).total_seconds()
+        except ValueError:
+            pass
+    return time.time() - fallback_start
+
+
+def wait_for_preview(
+    tag: str,
+    initial_phase: str,
+    poll=None,
+    sleep=None,
+    is_tty: bool | None = None,
+) -> dict:
+    """Poll `tag` until it reaches ready/failed/terminating, rendering progress.
+
+    On a TTY this redraws a single line with a spinner, the current step,
+    and elapsed time computed from `stepSince`; piped/redirected output
+    instead gets one plain line per step change, no `\\r`. Both degrade to
+    today's phase-change-only output whenever a record has no `step` --
+    either because the phase itself carries none (e.g. `ready`), or because
+    the server predates step-narration entirely.
+
+    `poll`, `sleep`, and `is_tty` are overridable so callers (tests) can
+    drive this off canned records instead of the real API / a real
+    terminal. Defaults are the real API, time.sleep, and sys.stdout.isatty().
+    """
+    poll = poll or (lambda: preview_api("GET", f"/api/previews/{tag}"))
+    sleep = sleep or time.sleep
+    if is_tty is None:
+        is_tty = sys.stdout.isatty()
+
+    deadline = time.time() + 30 * 60
+    phase = initial_phase
+    known_phases = {"creating", "ready", "failed", "terminating"}
+    noted_unknown_phase = False
+
+    current_step: str | None = None
+    current_step_since: str | None = None
+    current_step_start = time.time()
+    tick = 0
+    line_len = 0  # width of whatever's currently drawn on the TTY progress line
+
+    def tty_write(text: str) -> None:
+        nonlocal line_len
+        sys.stdout.write("\r" + text + " " * max(0, line_len - len(text)))
+        sys.stdout.flush()
+        line_len = len(text)
+
+    def tty_finish(text: str) -> None:
+        nonlocal line_len
+        sys.stdout.write("\r" + text + " " * max(0, line_len - len(text)) + "\n")
+        sys.stdout.flush()
+        line_len = 0
+
+    def tty_clear() -> None:
+        nonlocal line_len
+        if line_len:
+            sys.stdout.write("\r" + " " * line_len + "\r")
+            sys.stdout.flush()
+            line_len = 0
+
+    while time.time() < deadline:
+        sleep(3)
+        rec = poll()
+        new_phase = rec["phase"]
+        step = rec.get("step")
+        step_since = rec.get("stepSince")
+
+        if step is None:
+            # No step-level detail available -- an older bifrost that
+            # predates this field, or a phase (like `ready`) that
+            # legitimately carries none. Degrade to the original
+            # phase-change-only behavior.
+            tty_clear()
+            current_step = None
+            if new_phase != phase:
+                print(f"  {new_phase}")
+        else:
+            if step != current_step:
+                if current_step is not None and is_tty:
+                    elapsed = step_elapsed_seconds(
+                        current_step_since, current_step_start
+                    )
+                    tty_finish(f"  ✓ {current_step} — {format_elapsed(elapsed)}")
+                current_step = step
+                current_step_start = time.time()
+                if not is_tty:
+                    print(f"  {step}")
+            current_step_since = step_since
+            if is_tty:
+                elapsed = step_elapsed_seconds(current_step_since, current_step_start)
+                frame = spinner_frame(tick)
+                tick += 1
+                tty_write(f"  {frame} {step} — {format_elapsed(elapsed)}")
+
+        phase = new_phase
+
+        if new_phase == "ready":
+            tty_clear()
+            for app, url in sorted((rec.get("urls") or {}).items()):
+                print(f"  {app}: {url}")
+            return rec
+        if new_phase == "failed":
+            tty_clear()
+            err = rec.get("error")
+            fail_step = rec.get("step")
+            if fail_step and err:
+                print(f"Preview {tag} failed while {fail_step}: {err}", file=sys.stderr)
+            elif err:
+                print(f"Preview {tag} failed: {err}", file=sys.stderr)
+            else:
+                print(f"Preview {tag} failed (phase: failed).", file=sys.stderr)
+            print("Check the Previews tab in bifrost for details.", file=sys.stderr)
+            sys.exit(1)
+        if new_phase == "terminating":
+            tty_clear()
+            print(
+                f"Preview {tag} is being torn down (concurrent `preview down`?).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if new_phase not in known_phases and not noted_unknown_phase:
+            print(f"  (unrecognized phase {new_phase!r}; continuing to poll)")
+            noted_unknown_phase = True
+
+    tty_clear()
+    print(f"Timed out waiting for {tag}; check `ib preview list`.", file=sys.stderr)
+    sys.exit(1)
+
+
 def preview_up(branch: str, wait: bool = True) -> None:
     created = preview_api("POST", "/api/previews", {"branch": branch})
     tag = created["tag"]
@@ -409,38 +589,7 @@ def preview_up(branch: str, wait: bool = True) -> None:
     if not wait:
         print("Not waiting. Check with: ib preview list")
         return
-    deadline = time.time() + 30 * 60
-    phase = created.get("phase", "creating")
-    known_phases = {"creating", "ready", "failed", "terminating"}
-    noted_unknown_phase = False
-    while time.time() < deadline:
-        time.sleep(10)
-        rec = preview_api("GET", f"/api/previews/{tag}")
-        if rec["phase"] != phase:
-            phase = rec["phase"]
-            print(f"  {phase}")
-        if phase == "ready":
-            for app, url in sorted((rec.get("urls") or {}).items()):
-                print(f"  {app}: {url}")
-            return
-        if phase == "failed":
-            print(
-                f"Preview {tag} failed (phase: {phase}). "
-                "Check the Previews tab in bifrost for details.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if phase == "terminating":
-            print(
-                f"Preview {tag} is being torn down (concurrent `preview down`?).",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if phase not in known_phases and not noted_unknown_phase:
-            print(f"  (unrecognized phase {phase!r}; continuing to poll)")
-            noted_unknown_phase = True
-    print(f"Timed out waiting for {tag}; check `ib preview list`.", file=sys.stderr)
-    sys.exit(1)
+    wait_for_preview(tag, created.get("phase", "creating"))
 
 
 def preview_down(tag: str, yes: bool = False) -> None:
