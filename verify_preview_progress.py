@@ -250,4 +250,55 @@ for argv, label in cases:
     outcome = result if code is None else f"exit {code}: {out.strip()}"
     print(f"{label:<36} {argv!r:<32} -> {outcome}")
 
+
+# 7. A --ttl silently dropped by a server that doesn't support it yet (Task
+# 4, fix round 2). Go's json.Decoder ignores unknown request fields by
+# default, and bifrost's handler doesn't set DisallowUnknownFields, so a
+# server that predates `ttl` support accepts the POST, returns success, and
+# creates a preview with no `expiresAt` at all -- no error anywhere. This is
+# not hypothetical: prod bifrost hasn't been promoted with TTL support yet,
+# so today this is exactly what happens. warn_if_ttl_dropped is the
+# client-side check that catches it by comparing what was asked for against
+# what the record actually got. It's a warning, not a failure -- the
+# preview really was created -- so it never calls sys.exit; wrapping the
+# call in the same SystemExit-trapping pattern used elsewhere in this file
+# makes that "still exits 0" guarantee explicit rather than assumed.
+def check_ttl_warning(ttl, record, tag):
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = None
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            ib.warn_if_ttl_dropped(ttl, record, tag)
+        except SystemExit as e:
+            exit_code = e.code
+    return out.getvalue(), err.getvalue(), exit_code
+
+
+# 7a. TTL requested and honored -- expiresAt is on the record -- no warning.
+out, err, code = check_ttl_warning("8h", {"expiresAt": ts(-8 * 3600)}, "pr-30")
+assert err == "", f"honored TTL must not warn, got: {err!r}"
+assert code is None
+show("7a. --ttl requested and honored: no warning, exit unaffected", out, err, code)
+
+# 7b. TTL requested, server silently dropped it (old bifrost) -- warning on
+# stderr naming the likely cause and the consequence, but still exit 0.
+out, err, code = check_ttl_warning("8h", {"tag": "pr-31"}, "pr-31")
+assert "Warning" in err and "pr-31" in err and "8h" in err
+assert "not expire" in err.lower() or "will not expire" in err.lower(), err
+assert code is None, "a dropped TTL is a warning, not a failure -- must not exit"
+show(
+    "7b. --ttl requested but dropped by an old server: warning, exit still 0",
+    out,
+    err,
+    code,
+)
+
+# 7c. No TTL requested -- never warn, regardless of what's on the record
+# (including a preview that happens to carry an expiresAt from a past run).
+out, err, code = check_ttl_warning(None, {"tag": "pr-32"}, "pr-32")
+assert err == ""
+out2, err2, code2 = check_ttl_warning(None, {"expiresAt": ts(-3600)}, "pr-32")
+assert err2 == ""
+show("7c. No --ttl requested: no warning regardless of the record", out, err, code)
+
 print("\nAll scenarios passed.")
