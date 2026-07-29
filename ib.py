@@ -55,6 +55,18 @@ Usage:
     Against an older bifrost that doesn't report steps yet, it falls back
     to printing only on phase changes.
 
+    A preview mid up/down (including one bifrost is still working on after
+    this CLI's own request returned or timed out) is `busy`. `preview list`
+    marks it in the PHASE column -- `*` appended to a real phase (e.g.
+    `creating*`), or the bare word `busy` if there's no namespace yet to
+    report a phase on at all -- rather than showing a stale phase that
+    looks finished when it isn't. A create that lands on a preview whose
+    namespace is still being torn down cannot proceed; it fails rather than
+    guessing at what's colliding with it, and says to retry once the
+    teardown finishes. A create or delete that lands on a preview already
+    busy with another operation gets a 409, telling you to check `preview
+    list` rather than leaving you to guess.
+
 Examples:
     ib status
     ib status footstrike-api
@@ -163,7 +175,9 @@ def preview_api(method: str, path: str, body: dict | None = None) -> dict:
             )
         elif e.code == 409:
             print(
-                "That preview is busy — another up/down is in flight.", file=sys.stderr
+                "That preview is busy — another up/down is in flight. "
+                "`ib preview list` will show it while this is happening.",
+                file=sys.stderr,
             )
         elif e.code == 401:
             print("Unauthorized — check the preview API token.", file=sys.stderr)
@@ -483,12 +497,47 @@ def preview_auto_update_display(p: dict) -> str:
     return "✓" if p.get("autoUpdate", False) else "-"
 
 
+def preview_phase_display(p: dict) -> str:
+    """PHASE cell for a `preview list` row, with `busy` marked in place rather
+    than as a separate column.
+
+    `busy` is `omitempty` server-side, so it's plain *absent* (never
+    `false`) on a preview that isn't mid up/down -- `.get()` with a default
+    treats that absence as not-busy, same tolerance pattern as
+    `preview_expiry_display`/EXPIRES and `preview_auto_update_display`/AUTO.
+
+    A tag that's busy but has no namespace yet shows up as a synthesized
+    record with no `phase` at all -- there's nothing server-side to report
+    a phase on -- so that case renders the bare word 'busy' instead of a
+    blank cell or the literal string 'None'. An ordinary preview that has a
+    real phase keeps it, with a `*` suffix appended only while busy: the
+    same "something's still moving" signal `status -q` uses for a mid-
+    deploy image mismatch. That's the fix for the training-plans incident,
+    where a stale, unmarked 'ready'-looking table made a still-running
+    server-side `up` look finished.
+    """
+    phase = p.get("phase")
+    busy = p.get("busy", False)
+    if phase is None:
+        return "busy" if busy else "-"
+    return f"{phase}*" if busy else phase
+
+
 def preview_list(previews: list[dict] | None = None) -> None:
     """Print the preview table.
 
     `previews` is normally fetched live; overridable so callers (tests) can
     drive rendering off canned records instead of the real API -- same
     seam pattern as `wait_for_preview`'s `poll`/`sleep`/`is_tty`.
+
+    A tag that's busy but has no live namespace (a create still being
+    provisioned, or one whose namespace already finished tearing down)
+    shows up as a synthesized record: it may have no `branch`, `apps`,
+    `urls`, or `health` at all. BRANCH and HEALTH fall back to '-' the same
+    way EXPIRES/AUTO already do for an absent field, and APPS falls back to
+    an empty string (`apps` is already `.get(...) or []` below) -- never
+    the literal 'None', and never a KeyError from indexing a key a sparse
+    record doesn't have.
     """
     if previews is None:
         previews = preview_api("GET", "/api/previews").get("previews") or []
@@ -503,8 +552,11 @@ def preview_list(previews: list[dict] | None = None) -> None:
         apps = ",".join(p.get("apps") or [])
         expires = preview_expiry_display(p)
         auto = preview_auto_update_display(p)
+        phase = preview_phase_display(p)
+        branch = p.get("branch") or "-"
+        health = p.get("health") or "-"
         print(
-            f"{p['tag']:<24} {p['branch']:<24} {p['phase']:<10} {p['health']:<12} "
+            f"{p['tag']:<24} {branch:<24} {phase:<10} {health:<12} "
             f"{expires:<10} {auto:<5} {apps}"
         )
 
@@ -677,7 +729,9 @@ def wait_for_preview(
         if new_phase == "terminating":
             tty_clear()
             print(
-                f"Preview {tag} is being torn down (concurrent `preview down`?).",
+                f"Preview {tag}'s namespace is being torn down, so this "
+                "create cannot proceed. Retry once the teardown finishes "
+                "(`ib preview list` shows current status).",
                 file=sys.stderr,
             )
             sys.exit(1)

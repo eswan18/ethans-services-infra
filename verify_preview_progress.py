@@ -113,6 +113,25 @@ out, err, code = run(
 assert code == 1 and "Preview pr-3 failed (phase: failed)." in err
 show("3b. Failed run, no step/error (old server), non-TTY", out, err, code)
 
+# 3c. Terminating phase (client-side half of the training-plans incident,
+# Fix 1): the old message guessed "(concurrent `preview down`?)" -- in the
+# real incident that guess was wrong, the namespace's own teardown had
+# already completed and the CLI's own `up` was the thing still running.
+# The new message states only what's known (the namespace is being torn
+# down, so this create can't proceed) and says what to do (retry once
+# teardown finishes), without speculating about why.
+out, err, code = run(
+    "training-plans", "creating", [{"phase": "terminating"}], is_tty=True
+)
+assert code == 1
+assert "concurrent" not in err.lower(), "must not speculate about the cause"
+assert "training-plans" in err
+assert "namespace is being torn down" in err
+assert "cannot proceed" in err
+assert "retry" in err.lower()
+assert "ib preview list" in err
+show("3c. Terminating phase: states only what's known, says what to do", out, err, code)
+
 # 4. Malformed/naive stepSince must degrade to the local fallback anchor,
 #    not raise. This is exactly the bug a Fix-round-1 review caught: a
 #    timezone-naive ISO8601 string parses without ValueError but then
@@ -428,5 +447,85 @@ show(
     err,
     code,
 )
+
+# 10. `busy` rendering in `ib preview list` (Fix 3): a preview mid up/down
+# must look visibly different from an idle one -- marked on the existing
+# PHASE cell rather than a new column, per the task. Checked via
+# preview_phase_display directly and through the real table, same pattern
+# as EXPIRES/AUTO (sections 5/5b, 8) above.
+busy_creating = {
+    "tag": "training-plans",
+    "branch": "training-plans",
+    "phase": "creating",
+    "health": "unknown",
+    "busy": True,
+    "apps": ["training-plans"],
+}
+assert ib.preview_phase_display(busy_creating) == "creating*"
+assert ib.preview_phase_display(no_auto_update) == "ready", (
+    "a record with no `busy` key must not be marked busy"
+)
+
+busy_list_out = io.StringIO()
+with contextlib.redirect_stdout(busy_list_out):
+    ib.preview_list([busy_creating, no_auto_update])
+busy_list_output = busy_list_out.getvalue()
+busy_rows = {line.split()[0]: line for line in busy_list_output.splitlines() if line}
+assert "creating*" in busy_rows["training-plans"]
+assert "ready" in busy_rows["pr-10"] and "ready*" not in busy_rows["pr-10"]
+print("\n=== 10. `ib preview list` PHASE column: busy marked in place ===")
+print(busy_list_output)
+
+
+# 11. A tag that's busy but has no live namespace -- bifrost synthesizes a
+# sparse record for it (no branch/apps/urls/health, and here not even a
+# phase) so `preview list` doesn't fall back to "No preview environments."
+# while an operation is still in flight -- the second contradictory message
+# from the training-plans incident. Must render without 'None', without a
+# KeyError from indexing a key this record doesn't have, and without '-'
+# spam drowning out the one thing that IS known: it's busy.
+sparse_busy = {"tag": "training-plans", "busy": True}
+assert ib.preview_phase_display(sparse_busy) == "busy"
+
+sparse_list_out = io.StringIO()
+with contextlib.redirect_stdout(sparse_list_out):
+    ib.preview_list([sparse_busy])
+sparse_list_output = sparse_list_out.getvalue()
+assert "None" not in sparse_list_output
+sparse_row = next(
+    line
+    for line in sparse_list_output.splitlines()
+    if line.startswith("training-plans")
+)
+assert sparse_row.split()[0] == "training-plans"
+assert "busy" in sparse_row
+print(
+    "\n=== 11. `ib preview list`: sparse synthesized busy record (no namespace yet) ==="
+)
+print(sparse_list_output)
+
+
+# 12. A record with `busy` absent entirely -- the common case, and every
+# record from a bifrost that predates the `busy` field -- must render
+# exactly as it did before this change: no '*', no 'busy' text anywhere.
+no_busy_key = {
+    "tag": "pr-50",
+    "branch": "some-branch",
+    "phase": "ready",
+    "health": "healthy",
+    "apps": ["footstrike-api"],
+}
+assert "busy" not in no_busy_key
+no_busy_out = io.StringIO()
+with contextlib.redirect_stdout(no_busy_out):
+    ib.preview_list([no_busy_key])
+no_busy_output = no_busy_out.getvalue()
+assert "*" not in no_busy_output
+assert "busy" not in no_busy_output
+row50 = next(line for line in no_busy_output.splitlines() if line.startswith("pr-50"))
+assert row50.split()[:4] == ["pr-50", "some-branch", "ready", "healthy"]
+print("\n=== 12. `ib preview list`: record with `busy` absent renders unchanged ===")
+print(no_busy_output)
+
 
 print("\nAll scenarios passed.")
