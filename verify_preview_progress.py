@@ -205,4 +205,49 @@ assert "expired" in rows["pr-12"]
 print("\n=== 5b. `ib preview list` EXPIRES column, same three cases ===")
 print(list_output)
 
+
+# 6. `ib preview up` argument parsing (Task 4, fix round 1): --ttl must
+# never be silently dropped. A prior version matched only the exact token
+# "--ttl", so "--ttl=8h" (or any other unrecognized token) sat unconsumed
+# in args and was thrown away with no error -- the user asked for an 8h
+# lifetime and silently got a preview that never expires. parse_up_args now
+# requires the leftover args to reduce to exactly one token (the branch);
+# anything else -- including a leftover flag it doesn't recognize -- is a
+# usage error instead of a silent no-op.
+def parse_up(argv_tail: list[str]):
+    out, err = io.StringIO(), io.StringIO()
+    result = None
+    exit_code = None
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            result = ib.parse_up_args(list(argv_tail))
+        except SystemExit as e:
+            exit_code = e.code
+    return result, out.getvalue(), err.getvalue(), exit_code
+
+
+cases = [
+    ("mybranch", "bare branch, no flags"),
+    ("mybranch --ttl 8h", "--ttl 8h (space form)"),
+    ("mybranch --ttl 8h --no-wait", "--ttl 8h --no-wait"),
+    ("mybranch --ttl=8h", "--ttl=8h (unsupported equals form)"),
+    ("mybranch --ttl", "bare --ttl, no value"),
+    ("mybranch --typo=x", "unknown leftover flag"),
+]
+results = {argv: parse_up(argv.split()) for argv, _ in cases}
+
+assert results["mybranch"][0] == (False, None, "mybranch")
+assert results["mybranch --ttl 8h"][0] == (False, "8h", "mybranch")
+assert results["mybranch --ttl 8h --no-wait"][0] == (True, "8h", "mybranch")
+for argv in ("mybranch --ttl=8h", "mybranch --ttl", "mybranch --typo=x"):
+    result, out, _err, code = results[argv]
+    assert result is None and code == 1, (argv, result, code)
+    assert "Usage: ib preview up" in out, (argv, out)
+
+print("\n=== 6. ib preview up argument parsing: --ttl never silently dropped ===")
+for argv, label in cases:
+    result, out, _err, code = results[argv]
+    outcome = result if code is None else f"exit {code}: {out.strip()}"
+    print(f"{label:<36} {argv!r:<32} -> {outcome}")
+
 print("\nAll scenarios passed.")

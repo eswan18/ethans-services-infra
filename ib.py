@@ -658,10 +658,13 @@ def wait_for_preview(
 
 def preview_up(branch: str, wait: bool = True, ttl: str | None = None) -> None:
     body: dict = {"branch": branch}
-    if ttl:
-        # Passed through verbatim -- bifrost owns parsing/validation of the
+    if ttl is not None:
+        # Sent through verbatim whenever --ttl was given at all -- even an
+        # explicit empty string. bifrost owns parsing/validation of the
         # duration string and its 400 error message is what the caller sees
-        # on a bad value (see preview_api's error handling).
+        # on a bad value (see preview_api's error handling); a deliberately
+        # empty value should get the same server-owned 400 as any other bad
+        # value, not be silently treated the same as omitting --ttl.
         body["ttl"] = ttl
     created = preview_api("POST", "/api/previews", body)
     tag = created["tag"]
@@ -670,6 +673,34 @@ def preview_up(branch: str, wait: bool = True, ttl: str | None = None) -> None:
         print("Not waiting. Check with: ib preview list")
         return
     wait_for_preview(tag, created.get("phase", "creating"))
+
+
+def parse_up_args(args: list[str]) -> tuple[bool, str | None, str]:
+    """Parse the arguments after `ib preview up`. Returns (no_wait, ttl, branch).
+
+    Exits with a usage message unless what's left after pulling out
+    `--no-wait` and `--ttl <value>` reduces to exactly one token (the
+    branch). That's deliberate, not just a missing-branch check: it's also
+    what catches a leftover unrecognized token -- an `--ttl=8h` (this file
+    doesn't parse the equals form) or any typo'd flag -- which would
+    otherwise sit unconsumed in `args` and get silently dropped, leaving
+    the TTL the user asked for silently ignored and the preview created
+    with no expiry at all.
+    """
+    no_wait = "--no-wait" in args
+    args = [a for a in args if a != "--no-wait"]
+    ttl = None
+    if "--ttl" in args:
+        idx = args.index("--ttl")
+        if idx + 1 >= len(args):
+            print("Usage: ib preview up <branch> [--ttl <duration>] [--no-wait]")
+            sys.exit(1)
+        ttl = args[idx + 1]
+        del args[idx : idx + 2]
+    if len(args) != 1:
+        print("Usage: ib preview up <branch> [--ttl <duration>] [--no-wait]")
+        sys.exit(1)
+    return no_wait, ttl, args[0]
 
 
 def preview_down(tag: str, yes: bool = False) -> None:
@@ -721,22 +752,8 @@ def main() -> None:
         if subcommand == "list":
             preview_list()
         elif subcommand == "up":
-            no_wait = "--no-wait" in args
-            args = [a for a in args if a != "--no-wait"]
-            ttl = None
-            if "--ttl" in args:
-                idx = args.index("--ttl")
-                if idx + 1 >= len(args):
-                    print(
-                        "Usage: ib preview up <branch> [--ttl <duration>] [--no-wait]"
-                    )
-                    sys.exit(1)
-                ttl = args[idx + 1]
-                del args[idx : idx + 2]
-            if not args:
-                print("Usage: ib preview up <branch> [--ttl <duration>] [--no-wait]")
-                sys.exit(1)
-            preview_up(args[0], wait=not no_wait, ttl=ttl)
+            no_wait, ttl, branch = parse_up_args(args)
+            preview_up(branch, wait=not no_wait, ttl=ttl)
         elif subcommand == "down":
             yes = "-y" in args or "--yes" in args
             args = [a for a in args if a not in ("-y", "--yes")]
