@@ -1,12 +1,15 @@
 """Manual verification for wait_for_preview (Task 3), preview expiry
-rendering (Task 4), and `--auto-update` (Task 5) in ib.py.
+rendering (Task 4), `--auto-update` (Task 5), and `preview up`'s 404
+tolerance / created-vs-updated verb / rebuild summary in ib.py.
 
 Not wired into CI and not a pytest suite -- this repo has no test harness
 (no tests/ dir, no test framework in pyproject.toml's dependency groups,
 and .github/workflows/pull_request.yaml runs only `ruff check` and
 `ty check`). Real bifrost isn't reachable from a plain checkout either, so
-this drives wait_for_preview's poll/sleep/is_tty seam with canned records
-instead, and prints what it saw so a human can also eyeball it.
+this drives wait_for_preview's poll/sleep/is_tty seam and preview_up's
+`api` seam with canned records instead, and prints what it saw so a human
+can also eyeball it. unittest.mock (stdlib) swaps a module attribute where
+there is no seam; everything is still plain asserts in a plain script.
 
 Run manually from the repo root: uv run python verify_preview_progress.py
 """
@@ -14,6 +17,7 @@ Run manually from the repo root: uv run python verify_preview_progress.py
 import contextlib
 import io
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 import ib
 
@@ -689,22 +693,63 @@ show("14c. Poll loop, mismatch surfaces after a spinner was drawn", out, err, co
 # also proves no extra network call happens beyond what's asserted (an
 # unconsumed/extra call raises loudly instead of silently returning stale
 # data).
-def run_preview_up_no_wait(branch, responses):
-    calls = list(responses)
+#
+# Every `up` now opens with a pre-flight GET of the tag it expects bifrost
+# to derive (ib.tag_for_branch), so the FIRST canned response belongs to
+# that lookup, not to the POST. A canned entry that is an exception is
+# raised instead of returned -- which is exactly how the real preview_api
+# reports a 404 (ib.PreviewNotFound), so "no preview there yet" is
+# expressible without a live server.
+def run_preview_up(branch, responses, wait=False, **up_kwargs):
+    calls = []
+    queue = list(responses)
 
     def fake_preview_api(method: str, path: str, body: dict | None = None) -> dict:
-        if not calls:
+        calls.append((method, path))
+        if not queue:
             raise AssertionError(f"unexpected extra preview_api call: {method} {path}")
-        return calls.pop(0)
+        item = queue.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    # wait=True runs the REAL poll loop (so 404-tolerance and the rebuild
+    # summary are exercised through the real code), but preview_up doesn't
+    # thread wait_for_preview's sleep/is_tty seams out to its own callers --
+    # it has no reason to. Swapping the module attribute for the duration
+    # reaches them without adding test-only parameters to production code:
+    # real loop, instant sleeps, deterministic non-TTY output.
+    # unittest.mock is stdlib and restores the original on exit; this is
+    # still a plain script of asserts, not a pytest suite.
+    real_wait = ib.wait_for_preview
+
+    def fast_wait(tag, initial_phase, br, poll=None, sleep=None, is_tty=None):
+        return real_wait(
+            tag, initial_phase, br, poll=poll, sleep=lambda s: None, is_tty=False
+        )
 
     out, err = io.StringIO(), io.StringIO()
     exit_code = None
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        try:
-            ib.preview_up(branch, wait=False, api=fake_preview_api)
-        except SystemExit as e:
-            exit_code = e.code
-    return out.getvalue(), err.getvalue(), exit_code
+    with mock.patch.object(ib, "wait_for_preview", fast_wait):
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                ib.preview_up(branch, wait=wait, api=fake_preview_api, **up_kwargs)
+            except SystemExit as e:
+                exit_code = e.code
+    return out.getvalue(), err.getvalue(), exit_code, calls
+
+
+def run_preview_up_no_wait(branch, responses):
+    """`run_preview_up` with wait=False, dropping the call log (15a-d)."""
+    out, err, code, _ = run_preview_up(branch, responses, wait=False)
+    return out, err, code
+
+
+# The pre-flight lookup finds nothing for every scenario in 15 (their tags
+# are pr-NN, deliberately unrelated to the branch), so each one leads with
+# a 404 and the run reads as a creation, exactly as it did before this
+# existed.
+NOT_FOUND = ib.PreviewNotFound("unknown preview")
 
 
 # 15a. Same branch: proceeds through both the POST response check and the
@@ -712,6 +757,7 @@ def run_preview_up_no_wait(branch, responses):
 out, err, code = run_preview_up_no_wait(
     "my-feature",
     [
+        NOT_FOUND,  # pre-flight lookup
         {"tag": "pr-90", "phase": "ready", "branch": "my-feature"},  # POST
         {"tag": "pr-90", "phase": "ready", "branch": "my-feature"},  # follow-up GET
     ],
@@ -727,7 +773,7 @@ show("15a. --no-wait, same branch: proceeds normally", out, err, code)
 # one canned response is provided; a second call would raise).
 out, err, code = run_preview_up_no_wait(
     "branch-b",
-    [{"tag": "pr-91", "phase": "ready", "branch": "branch-a"}],  # POST only
+    [NOT_FOUND, {"tag": "pr-91", "phase": "ready", "branch": "branch-a"}],  # POST only
 )
 assert code == 1
 assert "branch-a" in err and "branch-b" in err
@@ -742,6 +788,7 @@ show("15b. --no-wait, POST response already reveals the collision", out, err, co
 out, err, code = run_preview_up_no_wait(
     "branch-b",
     [
+        NOT_FOUND,  # pre-flight lookup
         {"tag": "pr-92", "phase": "creating"},  # POST: no branch info yet
         {"tag": "pr-92", "phase": "ready", "branch": "branch-a"},  # follow-up GET
     ],
@@ -758,6 +805,7 @@ show("15c. --no-wait, collision only visible on the follow-up GET", out, err, co
 out, err, code = run_preview_up_no_wait(
     "some-branch",
     [
+        NOT_FOUND,  # pre-flight lookup
         {"tag": "pr-93", "phase": "ready"},
         {"tag": "pr-93", "phase": "ready"},
     ],
@@ -765,6 +813,319 @@ out, err, code = run_preview_up_no_wait(
 assert code is None and err == ""
 assert "Not waiting." in out
 show("15d. --no-wait, branch absent throughout: no false alarm", out, err, code)
+
+
+# 16. tag_for_branch mirrors bifrost's preview.TagForBranch, which is what
+# lets `up` look a preview up BEFORE the POST names the tag. Pinning the
+# documented properties here (folding, collapsing, truncation, trimming)
+# means drift from the Go version is visible in this script rather than as
+# a wrong verb in production.
+assert ib.tag_for_branch("my-feature") == "my-feature"
+assert ib.tag_for_branch("Feat/Foo") == "feat-foo"
+assert ib.tag_for_branch("feat_foo") == "feat-foo"
+assert ib.tag_for_branch("feat foo") == "feat-foo"
+assert ib.tag_for_branch("feat//foo") == "feat-foo", "runs of - collapse"
+assert ib.tag_for_branch("-lead-and-trail-") == "lead-and-trail"
+assert ib.tag_for_branch("feat/ünïcode!") == "feat-ncode", "outside [a-z0-9-] drops"
+long_branch = "feature/add-user-profile-avatars-v1"
+assert ib.tag_for_branch(long_branch) == "feature-add-user-profile-avata"
+assert len(ib.tag_for_branch(long_branch)) <= ib.PREVIEW_MAX_TAG_LEN
+assert ib.tag_for_branch("a" * 29 + "-b") == "a" * 29, "trailing - after the cut goes"
+print("\n=== 16. tag_for_branch mirrors bifrost's TagForBranch ===")
+print(f"  'Feat/Foo' -> {ib.tag_for_branch('Feat/Foo')!r}")
+print(f"  {long_branch!r} -> {ib.tag_for_branch(long_branch)!r}")
+
+
+# 17. The live bug: a 404 anywhere on the `up` path used to hit
+# preview_api's generic branch and exit 1 with "Preview API error 404".
+# bifrost 404s a tag with no namespace, and POST /api/previews returns
+# before the namespace exists, so that fired on creates that were going
+# perfectly.
+
+# 17a. Pre-flight lookup 404s (a brand-new preview) -> the run proceeds, and
+# proceeds as a CREATION: "Creating", and no rebuild line (there is no
+# before-image, and everything was built by definition).
+out, err, code, calls = run_preview_up(
+    "brand-new",
+    [
+        NOT_FOUND,  # pre-flight: nothing there yet
+        {"tag": "brand-new", "phase": "creating"},  # POST
+        {
+            "phase": "ready",
+            "branch": "brand-new",
+            "urls": {"footstrike-api": "https://footstrike-api-brand-new.preview"},
+            "builtImages": {
+                "footstrike-api": {"commit": "a" * 40, "shortSha": "aaaaaaa"}
+            },
+        },
+    ],
+    wait=True,
+)
+assert code is None and err == ""
+assert calls[0] == ("GET", "/api/previews/brand-new"), calls
+assert "Creating preview brand-new from brand-new..." in out
+assert "Updating" not in out
+assert "rebuilt" not in out, "a creation has no before-image to compare against"
+show("17a. Pre-flight 404: proceeds as a creation", out, err, code)
+
+# 17b. A 404 mid-poll (bifrost claimed the tag but EnsureNamespace hasn't
+# run yet) must keep waiting, not exit -- driven straight through
+# wait_for_preview's poll seam, where None is what preview_lookup returns
+# for a 404.
+out, err, code = run(
+    "pr-100",
+    "creating",
+    "my-feature",
+    [
+        None,  # 404: no namespace yet
+        None,  # still nothing
+        {"phase": "creating", "step": "building footstrike-api (1/1)"},
+        {
+            "phase": "ready",
+            "urls": {"footstrike-api": "https://footstrike-api-pr-100.preview"},
+        },
+    ],
+    is_tty=False,
+)
+assert code is None, "a 404 mid-poll must not end the wait"
+assert "footstrike-api: https://" in out
+assert "404" not in out and "404" not in err
+show("17b. 404 mid-poll: keeps waiting, then reaches ready", out, err, code)
+
+# 17c. The same thing end-to-end through preview_up, including the
+# pre-flight 404: nothing exists at any point until the namespace appears.
+out, err, code, calls = run_preview_up(
+    "slow-branch",
+    [
+        NOT_FOUND,  # pre-flight
+        {"tag": "slow-branch", "phase": "creating"},  # POST
+        NOT_FOUND,  # first poll: namespace not created yet
+        NOT_FOUND,  # second poll: still not
+        {
+            "phase": "ready",
+            "branch": "slow-branch",
+            "urls": {"footstrike-api": "https://footstrike-api-slow-branch.preview"},
+        },
+    ],
+    wait=True,
+)
+assert code is None and err == ""
+assert "footstrike-api: https://" in out
+show("17c. preview_up: 404 pre-flight AND mid-poll, still succeeds", out, err, code)
+
+# 17d. --no-wait with an immediate 404 on the follow-up GET -- the case
+# that aborted every time, since that GET goes out with zero delay after
+# the POST. Must reach "Not waiting.", exit 0, and (crucially) NOT warn
+# that --ttl/--auto-update were dropped: there is no record to check them
+# against, and warning off an absent record would be a false alarm.
+out, err, code, calls = run_preview_up(
+    "no-wait-branch",
+    [
+        NOT_FOUND,  # pre-flight
+        {"tag": "no-wait-branch", "phase": "creating"},  # POST
+        NOT_FOUND,  # follow-up GET, zero delay after the POST
+    ],
+    wait=False,
+    ttl="8h",
+    auto_update=True,
+)
+assert code is None, "a 404 here used to exit 1"
+assert "Not waiting." in out
+assert err == "", f"no record to verify against means nothing to warn about: {err!r}"
+show("17d. --no-wait, immediate 404 on the follow-up GET", out, err, code)
+
+
+# 17e/f. But a 404 must NOT vanish where it means something. Neither
+# `preview_down` nor `preview_list`'s fetch has an `api` seam (neither is
+# polled or re-run), so these swap the module attribute for the call, the
+# same way run_preview_up reaches wait_for_preview's sleep.
+def raising_api(method: str, path: str, body: dict | None = None) -> dict:
+    raise ib.PreviewNotFound("unknown preview")
+
+
+def run_against_404(call):
+    out_io, err_io = io.StringIO(), io.StringIO()
+    exit_code = None
+    with mock.patch.object(ib, "preview_api", raising_api):
+        with contextlib.redirect_stdout(out_io), contextlib.redirect_stderr(err_io):
+            try:
+                call()
+            except SystemExit as e:
+                exit_code = e.code
+    return out_io.getvalue(), err_io.getvalue(), exit_code
+
+
+# 17e. An unknown tag on `down` is exactly the error it looks like.
+out, err, code = run_against_404(lambda: ib.preview_down("no-such-tag", yes=True))
+assert code == 1, "an unknown tag on `down` must stay a nonzero failure"
+assert "no-such-tag" in err
+assert "Tearing down" not in out, "must not claim a teardown happened"
+show("17e. `preview down` on an unknown tag still fails", out, err, code)
+
+# 17f. And a 404 from the collection endpoint (the route itself missing)
+# stays fatal too -- never an empty table claiming there are no previews.
+out, err, code = run_against_404(ib.preview_list)
+assert code == 1
+assert "404" in err
+assert "No preview environments." not in out
+show("17f. `preview list` on a 404 route stays fatal", out, err, code)
+
+
+# 18. The verb: re-running against an existing preview said "Creating"
+# regardless, which is simply untrue. The pre-flight lookup decides it.
+#
+# `builtImages` is keyed by member and carries {commit, shortSha} per
+# bifrost's internal/web/previews.go; `commit` is what identifies a build,
+# and shortSha (its 7-char image-tag suffix) is derived from it.
+def image(commit: str) -> dict:
+    return {"commit": commit, "shortSha": commit[:7]}
+
+
+UNCHANGED = {
+    "footstrike-api": image("abc1234" + "0" * 33),
+    "footstrike-dashboard": image("def5678" + "0" * 33),
+}
+out, err, code, calls = run_preview_up(
+    "training-plans",
+    [
+        {  # pre-flight: the preview already exists
+            "tag": "training-plans",
+            "phase": "ready",
+            "branch": "training-plans",
+            "builtImages": dict(UNCHANGED),
+        },
+        {"tag": "training-plans", "phase": "creating"},  # POST
+        {
+            "phase": "ready",
+            "branch": "training-plans",
+            "urls": {
+                "footstrike-api": "https://footstrike-api-training-plans.preview",
+                "footstrike-dashboard": "https://footstrike-dashboard-tp.preview",
+            },
+            "builtImages": dict(UNCHANGED),  # every image reused
+        },
+    ],
+    wait=True,
+)
+assert code is None and err == ""
+assert "Updating preview training-plans from training-plans..." in out
+assert "Creating" not in out
+# 19. ...and the whole point of that snapshot: say when nothing was rebuilt.
+assert "  nothing rebuilt — all images reused" in out
+show(
+    "18/19. Existing preview, nothing changed: 'Updating' + nothing rebuilt",
+    out,
+    err,
+    code,
+)
+
+# 19b. Some members rebuilt -- name exactly those. footstrike-api's commit
+# moved; footstrike-dashboard's didn't; identity is on the after side only
+# (a new member, or an entry bifrost dropped as malformed on the before
+# side) and so is "can't tell" for that member, never "changed".
+out, err, code, calls = run_preview_up(
+    "training-plans",
+    [
+        {
+            "tag": "training-plans",
+            "phase": "ready",
+            "branch": "training-plans",
+            "builtImages": {
+                "footstrike-api": image("abc1234" + "0" * 33),
+                "footstrike-dashboard": image("d5" + "0" * 38),
+            },
+        },
+        {"tag": "training-plans", "phase": "creating"},
+        {
+            "phase": "ready",
+            "branch": "training-plans",
+            "urls": {},
+            "builtImages": {
+                "footstrike-api": image("9999999" + "0" * 33),  # rebuilt
+                "footstrike-dashboard": image("d5" + "0" * 38),  # reused
+                "identity": image("7" * 40),  # only on this side
+            },
+        },
+    ],
+    wait=True,
+)
+assert code is None and err == ""
+assert "  rebuilt: footstrike-api\n" in out, out
+assert "identity" not in out, "a member on one side only is not a rebuild"
+assert "nothing rebuilt" not in out
+show("19b. Some members rebuilt: named, reused ones omitted", out, err, code)
+
+# 19c. Only the commit is compared. A shortSha that disagrees with its own
+# commit (never expected -- it's derived) must not by itself read as a
+# rebuild.
+assert (
+    ib.rebuild_summary(
+        {"builtImages": {"a": {"commit": "1" * 40, "shortSha": "1111111"}}},
+        {"builtImages": {"a": {"commit": "1" * 40, "shortSha": "zzzzzzz"}}},
+    )
+    == "  nothing rebuilt — all images reused"
+)
+
+
+# 20. The field is new server-side and may be absent on either side (an
+# older bifrost, or a preview that predates it). Absent = "can't tell", and
+# can't-tell prints today's output and says NOTHING -- no line, and
+# deliberately no warning either: unlike a dropped --ttl this is cosmetic,
+# and a false "nothing rebuilt" would be worse than silence.
+def rebuild_case(label, before, after):
+    responses = [
+        {"tag": "reruns", "phase": "ready", "branch": "reruns", **before},
+        {"tag": "reruns", "phase": "creating"},
+        {"phase": "ready", "branch": "reruns", "urls": {}, **after},
+    ]
+    out, err, code, _ = run_preview_up("reruns", responses, wait=True)
+    assert code is None and err == "", (label, err)
+    assert "rebuilt" not in out, f"{label}: must say nothing, got {out!r}"
+    assert "Updating preview reruns from reruns..." in out, label
+    return out
+
+
+IMAGES = {"builtImages": {"footstrike-api": image("abc1234" + "0" * 33)}}
+rebuild_case("absent on the after side", IMAGES, {})
+rebuild_case("absent on the before side", {}, IMAGES)
+rebuild_case("absent on both sides", {}, {})
+out = rebuild_case(
+    "no members in common", IMAGES, {"builtImages": {"x": image("f" * 40)}}
+)
+show(
+    "20. builtImages absent/incomparable on either side: no line, no warning",
+    out,
+    "",
+    None,
+)
+
+# 20b. The same tolerance at the unit level, including cases a live run
+# won't produce: `omitempty` means the key is absent rather than empty, so
+# an empty map should never arrive -- it's still read as "can't tell"
+# rather than as "no members, nothing rebuilt".
+A1 = {"builtImages": {"a": image("1" * 40)}}
+A2 = {"builtImages": {"a": image("2" * 40)}}
+assert ib.rebuild_summary(None, A1) is None
+assert ib.rebuild_summary(A1, None) is None
+assert ib.rebuild_summary({}, {}) is None
+assert ib.rebuild_summary({"builtImages": {}}, A1) is None
+assert ib.rebuild_summary(A1, A1) == "  nothing rebuilt — all images reused"
+assert ib.rebuild_summary(A1, A2) == "  rebuilt: a"
+# An entry with no usable commit is skipped, not compared as
+# empty-equals-empty (which would read as "reused").
+assert ib.rebuild_summary({"builtImages": {"a": {"shortSha": "1111111"}}}, A1) is None
+assert ib.rebuild_summary({"builtImages": {"a": {"commit": ""}}}, A1) is None, (
+    "an empty commit is not a comparison"
+)
+# A member that LEFT the preview isn't a build and isn't reported.
+assert (
+    ib.rebuild_summary(
+        {"builtImages": {"a": image("1" * 40), "b": image("1" * 40)}}, A1
+    )
+    == "  nothing rebuilt — all images reused"
+)
+print("\n=== 20b. rebuild_summary unit cases (absences, partial maps) ===")
+print("  all pass")
 
 
 print("\nAll scenarios passed.")

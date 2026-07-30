@@ -10,6 +10,7 @@ Usage:
     ib promote <app> -y     # Promote without confirmation
     ib preview list                     # Table of preview environments, TTL remaining
     ib preview up <branch>              # Create/update, show live progress, print URLs
+                                        #   (says which, and what it rebuilt)
     ib preview up <branch> --ttl 8h     # Same, but auto-expire (and get reaped) after 8h
     ib preview up <branch> --no-wait    # Fire and return the tag
     ib preview up <branch> --auto-update  # Same, but redeploy automatically when the branch moves
@@ -47,6 +48,30 @@ Usage:
     ignores the field -- `preview up` prints a warning to stderr and still
     exits 0: the preview was created and is usable, it just won't follow
     the branch on its own.
+
+    `preview up` says whether it is *creating* a preview or *updating*
+    an existing one -- it looks the preview up before asking bifrost to
+    build anything, so the first line is honest about which happened
+    instead of always claiming a create.
+
+    When a run finishes, `up` adds one line saying what it actually
+    rebuilt: `nothing rebuilt — all images reused` when every member's
+    image was reused (the usual outcome of re-running against an
+    unchanged branch, which takes seconds), or `rebuilt: <members>`
+    naming the ones that changed. A brand-new preview gets no such line
+    -- everything was built, that is what creating one means -- and
+    neither does a preview whose record doesn't report what its images
+    were built from, e.g. against an older bifrost or a preview created
+    before that field existed. The line is omitted rather than guessed
+    at: saying nothing beats claiming nothing changed when something did.
+
+    A preview that does not exist yet is not an error. bifrost accepts a
+    create and answers immediately, well before the namespace behind the
+    tag exists, so `up` reads a "not found" lookup as "not created yet"
+    and keeps waiting (`--no-wait` just returns, with nothing to verify).
+    `ib preview down` still treats an unknown tag as the error it is
+    there, and exits nonzero rather than reporting a teardown that never
+    happened.
 
     `preview up` polls every 3s while a preview is being created. On a
     terminal it redraws a single line with a spinner, the current build
@@ -149,8 +174,31 @@ def preview_token() -> str:
     )
 
 
+class PreviewNotFound(Exception):
+    """Raised by `preview_api` when a preview lookup 404s.
+
+    Deliberately an exception rather than an exit, because a 404 is not
+    always a failure: bifrost 404s any tag with no namespace behind it,
+    and `POST /api/previews` returns 202 as soon as it accepts the
+    request -- membership resolution, pre-flight and EnsureNamespace all
+    run afterward in a detached goroutine, so there's a window (seconds
+    to minutes) where the preview being created legitimately does not
+    exist yet. Which of "not created yet", "already gone" and "no such
+    preview" a 404 means depends entirely on who asked, so this carries
+    it to the caller instead of guessing: `preview_lookup` reads it as
+    absence, `preview_down` reads it as the error it really is there.
+
+    The message is the server's error detail, so a caller that does treat
+    it as fatal can print exactly what the generic handler used to.
+    """
+
+
 def preview_api(method: str, path: str, body: dict | None = None) -> dict:
-    """Call bifrost's preview API. Exits with a clear message on failure."""
+    """Call bifrost's preview API. Exits with a clear message on failure.
+
+    A 404 is the one status that doesn't exit here -- see
+    `PreviewNotFound`. Every other error is terminal, same as before.
+    """
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         f"{BIFROST_URL}{path}",
@@ -192,12 +240,37 @@ def preview_api(method: str, path: str, body: dict | None = None) -> dict:
             )
         elif e.code == 401:
             print("Unauthorized — check the preview API token.", file=sys.stderr)
+        elif e.code == 404:
+            raise PreviewNotFound(detail) from None
         else:
             print(f"Preview API error {e.code}: {detail}", file=sys.stderr)
         sys.exit(1)
     except urllib.error.URLError as e:
         print(f"Cannot reach bifrost at {BIFROST_URL}: {e.reason}", file=sys.stderr)
         sys.exit(1)
+
+
+def preview_lookup(tag: str, api=None) -> dict | None:
+    """Fetch one preview record, or None if bifrost has no namespace for `tag`.
+
+    The tolerant read of a 404 (see `PreviewNotFound`), for the two
+    callers that genuinely can't tell "not created yet" from "no such
+    preview" and don't need to: the poll loop, which keeps waiting either
+    way until its own deadline, and `preview_up`'s pre-flight lookup,
+    which reads absence as "nothing here to update". Neither of them ever
+    sees a bare 404 as fatal, which is what made `--no-wait` abort with
+    `Preview API error 404` on a create that was proceeding perfectly.
+
+    `api` is overridable so callers (tests) can drive this off canned
+    responses instead of the real API -- same injectable-seam pattern as
+    `wait_for_preview`'s `poll`/`sleep`/`is_tty`. A fake signals "not
+    found" exactly the way the real one does, by raising PreviewNotFound.
+    """
+    api = api or preview_api
+    try:
+        return api("GET", f"/api/previews/{tag}")
+    except PreviewNotFound:
+        return None
 
 
 def images_from_pods(pods: list[dict]) -> set[str]:
@@ -551,7 +624,16 @@ def preview_list(previews: list[dict] | None = None) -> None:
     record doesn't have.
     """
     if previews is None:
-        previews = preview_api("GET", "/api/previews").get("previews") or []
+        try:
+            previews = preview_api("GET", "/api/previews").get("previews") or []
+        except PreviewNotFound as e:
+            # The collection endpoint has nothing to be missing about: an
+            # empty fleet is a 200 with an empty list. A 404 is the route
+            # itself not being there (a bifrost predating the preview API,
+            # or something in front of it), which is fatal in the ordinary
+            # way -- never an empty table claiming there are no previews.
+            print(f"Preview API error 404: {e}", file=sys.stderr)
+            sys.exit(1)
     if not previews:
         print("No preview environments.")
         return
@@ -692,11 +774,16 @@ def wait_for_preview(
     poll (not just the first) since the record backing `tag` can only be
     known once bifrost's detached goroutine has actually run.
 
+    `poll` returning None means the tag has no namespace yet (bifrost
+    404s it -- see `preview_lookup`), which is the normal state of a
+    brand-new preview for the first polls and is waited through rather
+    than treated as an error.
+
     `poll`, `sleep`, and `is_tty` are overridable so callers (tests) can
     drive this off canned records instead of the real API / a real
     terminal. Defaults are the real API, time.sleep, and sys.stdout.isatty().
     """
-    poll = poll or (lambda: preview_api("GET", f"/api/previews/{tag}"))
+    poll = poll or (lambda: preview_lookup(tag))
     sleep = sleep or time.sleep
     if is_tty is None:
         is_tty = sys.stdout.isatty()
@@ -734,6 +821,17 @@ def wait_for_preview(
     while time.time() < deadline:
         sleep(3)
         rec = poll()
+        if rec is None:
+            # No namespace behind the tag yet (a 404 -- see
+            # `preview_lookup`). bifrost claims the tag and answers the
+            # create request long before EnsureNamespace runs, so this is
+            # just "the server hasn't caught up", the same class of thing
+            # as an unrecognized phase or a missing `step`, and gets the
+            # same treatment: keep waiting. Nothing is printed or cleared
+            # -- a spinner line, if one is drawn, is redrawn with a fresh
+            # elapsed time on the next poll that does have a record. The
+            # deadline above is what ends a wait that never resolves.
+            continue
         fail_if_branch_mismatch(branch, rec, tag, on_fail=tty_clear)
         new_phase = rec["phase"]
         step = rec.get("step")
@@ -861,6 +959,114 @@ def warn_if_auto_update_dropped(
     )
 
 
+PREVIEW_MAX_TAG_LEN = 30
+
+
+def tag_for_branch(branch: str) -> str:
+    """The preview tag bifrost will derive from `branch`.
+
+    A mirror of bifrost's `preview.TagForBranch` (internal/preview/tag.go):
+    lowercase; '/', '_' and space become '-'; anything else outside
+    [a-z0-9-] is dropped; runs of '-' collapse; leading/trailing '-' are
+    trimmed; capped at PREVIEW_MAX_TAG_LEN with any trailing '-' the cut
+    leaves trimmed too.
+
+    It exists only so `preview_up` can look a preview up BEFORE asking
+    bifrost to build it -- the POST response is the authoritative tag, but
+    it arrives too late to say whether this run creates or updates, and
+    too late to snapshot what the preview's images were built from. Being
+    a mirror, it can in principle drift from the server's rule; nothing is
+    trusted to it, because `preview_up` compares it against the tag the
+    POST actually returned and throws the pre-flight record away if they
+    disagree. A wrong guess therefore costs one wasted GET and falls back
+    to today's output, never a wrong verb or a false "nothing rebuilt".
+    """
+    kept = []
+    for ch in branch.lower():
+        if ch in "/_ ":
+            kept.append("-")
+        elif ch == "-" or "a" <= ch <= "z" or "0" <= ch <= "9":
+            kept.append(ch)
+    tag = re.sub(r"-+", "-", "".join(kept)).strip("-")
+    return tag[:PREVIEW_MAX_TAG_LEN].rstrip("-")
+
+
+# The preview record's per-member built-image map:
+#
+#   "builtImages": {"footstrike-api": {"commit": "c58881f6...",
+#                                      "shortSha": "c58881f"}}
+#
+# Named once, here, because the field is new server-side and this CLI must
+# keep working against a bifrost that predates it.
+BUILT_IMAGES_FIELD = "builtImages"
+
+
+def built_commits(record: dict | None) -> dict[str, str] | None:
+    """Member -> the commit its current image was built from, or None if unknowable.
+
+    None means "can't tell": no record at all, or no `builtImages` on it.
+    The field is `omitempty` server-side, so it is plain *absent* -- never
+    `{}` and never null -- on an older bifrost, on a preview created
+    before the field existed, and when every entry was malformed enough
+    for bifrost to drop it. Same `.get()`-with-a-default tolerance as
+    `expiresAt`/`autoUpdate`, and the same reason: absence is a normal
+    state of a field a server may not report yet.
+
+    `commit` is what identifies a build; `shortSha` is derived from it
+    (it's the image tag suffix) and is deliberately not what's compared.
+    An entry without a usable commit is skipped rather than compared as
+    empty-equals-empty, which would read as "reused".
+    """
+    if not record:
+        return None
+    images = record.get(BUILT_IMAGES_FIELD)
+    if not images:
+        return None
+    commits = {
+        member: built["commit"]
+        for member, built in images.items()
+        if isinstance(built, dict) and built.get("commit")
+    }
+    return commits or None
+
+
+def rebuild_summary(before: dict | None, after: dict | None) -> str | None:
+    """One line saying what an `up` actually rebuilt, or None to say nothing.
+
+    A re-run against an unchanged branch reuses every member's image and
+    finishes in seconds, which otherwise looks exactly like a full
+    rebuild. Comparing the pre-POST snapshot against the finished record
+    is the only way to tell those apart from the client side.
+
+    Only members present on BOTH sides are compared. bifrost drops
+    malformed entries individually, so the map can legitimately be
+    present but incomplete -- a member on one side only is "can't tell"
+    for that member, never "changed", and a comparison with nothing in
+    common is "can't tell" outright.
+
+    Returns None whenever either side is unknowable (see `built_commits`),
+    including for a brand-new preview, which has no "before" and is a
+    creation rather than a no-op. Unlike a silently dropped `--ttl` this
+    is never warned about: it's cosmetic, and a false "nothing rebuilt"
+    would be worse than saying nothing at all.
+    """
+    before_commits = built_commits(before)
+    after_commits = built_commits(after)
+    if before_commits is None or after_commits is None:
+        return None
+    comparable = [member for member in after_commits if member in before_commits]
+    if not comparable:
+        return None
+    rebuilt = sorted(
+        member
+        for member in comparable
+        if after_commits[member] != before_commits[member]
+    )
+    if not rebuilt:
+        return "  nothing rebuilt — all images reused"
+    return f"  rebuilt: {', '.join(rebuilt)}"
+
+
 def preview_up(
     branch: str,
     wait: bool = True,
@@ -869,6 +1075,14 @@ def preview_up(
     api=None,
 ) -> None:
     """Create/update the preview for `branch` and (unless `wait` is False) block until ready.
+
+    One extra GET runs before the POST, and both of the things it buys are
+    only knowable before bifrost starts working: whether this run creates
+    a preview or updates an existing one (it said "Creating" either way
+    until now), and what each member's image was built from beforehand, so
+    the finished record can be compared against it and the user told what
+    was actually rebuilt. It costs one cheap request next to a create that
+    takes minutes, and a brand-new preview simply 404s it.
 
     `api` is overridable so callers (tests) can drive this off canned
     responses instead of the real bifrost API -- same injectable-seam
@@ -890,7 +1104,27 @@ def preview_up(
         # absent when the flag isn't given (mirrors the record's own
         # `omitempty`), never an explicit `"autoUpdate": false`.
         body["autoUpdate"] = True
-    created = api("POST", "/api/previews", body)
+    # The pre-flight lookup. None means no preview under that tag yet --
+    # this is a creation, and there is no before-image to compare against.
+    expected_tag = tag_for_branch(branch)
+    before = preview_lookup(expected_tag, api) if expected_tag else None
+    existing_branch = before.get("branch") if before else None
+    if existing_branch and existing_branch != branch:
+        # The tag is a different branch's preview (see
+        # fail_if_branch_mismatch). Whatever this run turns out to be, it
+        # isn't an update of THAT, and its images are none of our business
+        # -- drop the snapshot rather than describe someone else's
+        # preview. The POST-response and poll-loop checks below still
+        # refuse the run itself, exactly as they do today.
+        before = None
+    try:
+        created = api("POST", "/api/previews", body)
+    except PreviewNotFound as e:
+        # Same reasoning as preview_list's: the create endpoint can't
+        # answer "no such preview" -- creating one is the point -- so a
+        # 404 is the route missing, and stays fatal.
+        print(f"Preview API error 404: {e}", file=sys.stderr)
+        sys.exit(1)
     tag = created["tag"]
     # Checked before anything else is printed: bifrost's tag derivation is
     # many-to-one (see fail_if_branch_mismatch), and the collision refusal
@@ -900,7 +1134,13 @@ def preview_up(
     # loop's spinner -- means a doomed request never looks like it's making
     # progress.
     fail_if_branch_mismatch(branch, created, tag)
-    print(f"Creating preview {tag} from {branch}...")
+    if tag != expected_tag:
+        # The guessed tag wasn't the real one (see tag_for_branch), so the
+        # record fetched above describes some other preview. Fall back to
+        # today's behavior -- "Creating", no rebuild line -- rather than
+        # report on the wrong thing.
+        before = None
+    print(f"{'Updating' if before else 'Creating'} preview {tag} from {branch}...")
     if not wait:
         # No poll loop to piggyback a TTL/auto-update/branch check on here,
         # so this does one extra GET instead of skipping verification -- a
@@ -909,18 +1149,30 @@ def preview_up(
         # didn't yet reveal, is exactly the kind of thing a --no-wait/CI
         # caller is least likely to notice on their own, and a single
         # request is cheap next to the POST that already just ran.
-        record = api("GET", f"/api/previews/{tag}")
-        fail_if_branch_mismatch(branch, record, tag)
-        warn_if_ttl_dropped(ttl, record, tag)
-        warn_if_auto_update_dropped(auto_update, record, tag, branch)
+        record = preview_lookup(tag, api)
+        if record is not None:
+            fail_if_branch_mismatch(branch, record, tag)
+            warn_if_ttl_dropped(ttl, record, tag)
+            warn_if_auto_update_dropped(auto_update, record, tag, branch)
+        # A missing record (404) means bifrost hasn't created the namespace
+        # yet -- overwhelmingly the common case here, since this GET goes
+        # out with no delay at all after a POST whose work is still queued
+        # behind ~7 sequential GitHub calls. There is nothing to check and
+        # nothing wrong: the checks above are skipped rather than run
+        # against an empty record, which would report every flag as
+        # silently dropped. No rebuild summary either -- nothing has been
+        # rebuilt yet by definition, which is what --no-wait asked for.
         print("Not waiting. Check with: ib preview list")
         return
     record = wait_for_preview(
         tag,
         created.get("phase", "creating"),
         branch,
-        poll=lambda: api("GET", f"/api/previews/{tag}"),
+        poll=lambda: preview_lookup(tag, api),
     )
+    summary = rebuild_summary(before, record)
+    if summary:
+        print(summary)
     warn_if_ttl_dropped(ttl, record, tag)
     warn_if_auto_update_dropped(auto_update, record, tag, branch)
 
@@ -962,12 +1214,29 @@ def parse_up_args(args: list[str]) -> tuple[bool, str | None, bool, str]:
 
 
 def preview_down(tag: str, yes: bool = False) -> None:
+    """Tear down `tag`. An unknown tag is an error here, not an absence.
+
+    The opposite reading of a 404 from `preview_lookup`'s: nobody types
+    `ib preview down` at a tag they don't believe exists, so "no such
+    preview" is either a typo or a preview already gone -- and swallowing
+    it would report a teardown that never happened. Exits nonzero, same
+    as every other API failure, just with a message that says which of
+    them this was.
+    """
     if not yes:
         answer = input(f"Tear down preview {tag}? [y/N] ").strip().lower()
         if answer != "y":
             print("Aborted.")
             return
-    preview_api("DELETE", f"/api/previews/{tag}")
+    try:
+        preview_api("DELETE", f"/api/previews/{tag}")
+    except PreviewNotFound:
+        print(
+            f"No preview {tag} — nothing to tear down. "
+            "`ib preview list` shows what exists.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     print(f"Tearing down {tag}.")
 
 
