@@ -67,6 +67,17 @@ Usage:
     busy with another operation gets a 409, telling you to check `preview
     list` rather than leaving you to guess.
 
+    bifrost derives a preview's tag from the branch name, and that mapping
+    is many-to-one -- `feat/foo`, `feat-foo`, and `feat_foo` all fold to the
+    same tag, and long branch names truncate to the same 30 characters. If
+    the tag `up` computes for your branch already belongs to a *different*
+    branch's preview, the create is refused; `ib preview up` fails with a
+    nonzero exit naming both branches instead of reporting success and
+    printing the other branch's URLs. Rename this branch, or tear the
+    existing preview down first (`ib preview down <tag>`). Re-running `up`
+    on the SAME branch -- the documented recovery path, and what
+    `--auto-update` does on its own timer -- is unaffected.
+
 Examples:
     ib status
     ib status footstrike-api
@@ -613,9 +624,54 @@ def step_elapsed_seconds(step_since: str | None, fallback_start: float) -> float
     return time.time() - fallback_start
 
 
+def fail_if_branch_mismatch(
+    requested_branch: str, record: dict, tag: str, on_fail=None
+) -> None:
+    """Exit if `tag` already belongs to a different branch than `requested_branch`.
+
+    bifrost derives a preview's tag from its branch name, and that mapping is
+    many-to-one (slash/dash/underscore variants fold together, long names
+    truncate to 30 chars) -- so a `POST /api/previews` for one branch can
+    land on a tag some other branch's preview already owns. bifrost refuses
+    that Up server-side (`ErrTagCollision`), but only from inside the
+    detached goroutine that runs after the 202 response, so the refusal
+    never reaches this CLI -- polling the tag afterward just shows the
+    *other* branch's preview looking perfectly healthy. This is the
+    client-side backstop: every preview record carries the `branch` its
+    namespace was actually built for (from the `bifrost/branch` annotation),
+    so comparing it against what was asked for catches the collision before
+    this CLI reports success with someone else's URLs.
+
+    `branch` absent or empty on `record` means "can't tell" -- an older
+    preview predating the annotation, or one from a partial/failed run --
+    and is deliberately not treated as a mismatch; a false alarm here is
+    worse than the silent-success bug this exists to catch.
+
+    Re-running `up` on the SAME branch -- the documented recovery path, and
+    what the `--auto-update` watcher does every couple of minutes -- compares
+    equal and is a no-op here, same as today.
+
+    `on_fail`, if given, runs immediately before the error is printed (the
+    poll loop in `wait_for_preview` uses it to clear its spinner line first).
+    """
+    existing_branch = record.get("branch")
+    if not existing_branch or existing_branch == requested_branch:
+        return
+    if on_fail is not None:
+        on_fail()
+    print(
+        f"Preview tag {tag} belongs to branch {existing_branch!r}, not "
+        f"{requested_branch!r}. Rename this branch, or tear down the "
+        f"existing preview: ib preview down {tag}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def wait_for_preview(
     tag: str,
     initial_phase: str,
+    branch: str,
     poll=None,
     sleep=None,
     is_tty: bool | None = None,
@@ -628,6 +684,13 @@ def wait_for_preview(
     today's phase-change-only output whenever a record has no `step` --
     either because the phase itself carries none (e.g. `ready`), or because
     the server predates step-narration entirely.
+
+    Every polled record is checked against `branch` via
+    `fail_if_branch_mismatch` before anything else -- see that function for
+    why: a tag collision with someone else's branch means this loop would
+    otherwise happily report *their* preview as a success. Checked on every
+    poll (not just the first) since the record backing `tag` can only be
+    known once bifrost's detached goroutine has actually run.
 
     `poll`, `sleep`, and `is_tty` are overridable so callers (tests) can
     drive this off canned records instead of the real API / a real
@@ -671,6 +734,7 @@ def wait_for_preview(
     while time.time() < deadline:
         sleep(3)
         rec = poll()
+        fail_if_branch_mismatch(branch, rec, tag, on_fail=tty_clear)
         new_phase = rec["phase"]
         step = rec.get("step")
         step_since = rec.get("stepSince")
@@ -802,7 +866,16 @@ def preview_up(
     wait: bool = True,
     ttl: str | None = None,
     auto_update: bool = False,
+    api=None,
 ) -> None:
+    """Create/update the preview for `branch` and (unless `wait` is False) block until ready.
+
+    `api` is overridable so callers (tests) can drive this off canned
+    responses instead of the real bifrost API -- same injectable-seam
+    pattern as `wait_for_preview`'s `poll`/`sleep`/`is_tty`. Defaults to the
+    real `preview_api`.
+    """
+    api = api or preview_api
     body: dict = {"branch": branch}
     if ttl is not None:
         # Sent through verbatim whenever --ttl was given at all -- even an
@@ -817,22 +890,37 @@ def preview_up(
         # absent when the flag isn't given (mirrors the record's own
         # `omitempty`), never an explicit `"autoUpdate": false`.
         body["autoUpdate"] = True
-    created = preview_api("POST", "/api/previews", body)
+    created = api("POST", "/api/previews", body)
     tag = created["tag"]
+    # Checked before anything else is printed: bifrost's tag derivation is
+    # many-to-one (see fail_if_branch_mismatch), and the collision refusal
+    # happens in a detached goroutine after this 202 already landed, so the
+    # POST response can already be someone else's ready preview. Catching it
+    # here -- before the "Creating preview..." line, let alone the poll
+    # loop's spinner -- means a doomed request never looks like it's making
+    # progress.
+    fail_if_branch_mismatch(branch, created, tag)
     print(f"Creating preview {tag} from {branch}...")
     if not wait:
-        # No poll loop to piggyback a TTL/auto-update check on here, so
-        # this does one extra GET instead of skipping verification -- a
+        # No poll loop to piggyback a TTL/auto-update/branch check on here,
+        # so this does one extra GET instead of skipping verification -- a
         # flag silently dropped by an old server (see warn_if_ttl_dropped /
-        # warn_if_auto_update_dropped) is exactly the kind of thing a
-        # --no-wait/CI caller is least likely to notice on their own, and a
-        # single request is cheap next to the POST that already just ran.
-        record = preview_api("GET", f"/api/previews/{tag}")
+        # warn_if_auto_update_dropped), or a tag collision the POST response
+        # didn't yet reveal, is exactly the kind of thing a --no-wait/CI
+        # caller is least likely to notice on their own, and a single
+        # request is cheap next to the POST that already just ran.
+        record = api("GET", f"/api/previews/{tag}")
+        fail_if_branch_mismatch(branch, record, tag)
         warn_if_ttl_dropped(ttl, record, tag)
         warn_if_auto_update_dropped(auto_update, record, tag, branch)
         print("Not waiting. Check with: ib preview list")
         return
-    record = wait_for_preview(tag, created.get("phase", "creating"))
+    record = wait_for_preview(
+        tag,
+        created.get("phase", "creating"),
+        branch,
+        poll=lambda: api("GET", f"/api/previews/{tag}"),
+    )
     warn_if_ttl_dropped(ttl, record, tag)
     warn_if_auto_update_dropped(auto_update, record, tag, branch)
 
