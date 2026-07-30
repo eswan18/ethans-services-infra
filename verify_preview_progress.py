@@ -24,14 +24,19 @@ def ts(seconds_ago: float) -> str:
     return when.isoformat().replace("+00:00", "Z")
 
 
-def run(tag, initial_phase, records, is_tty):
+def run(tag, initial_phase, branch, records, is_tty):
     poll = iter(records).__next__
     out, err = io.StringIO(), io.StringIO()
     exit_code = None
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         try:
             ib.wait_for_preview(
-                tag, initial_phase, poll=poll, sleep=lambda s: None, is_tty=is_tty
+                tag,
+                initial_phase,
+                branch,
+                poll=poll,
+                sleep=lambda s: None,
+                is_tty=is_tty,
             )
         except SystemExit as e:
             exit_code = e.code
@@ -65,13 +70,13 @@ records_ok = [
         },
     },
 ]
-out, err, code = run("pr-42", "creating", list(records_ok), is_tty=True)
+out, err, code = run("pr-42", "creating", "my-feature", list(records_ok), is_tty=True)
 assert code is None
 assert "\r" in out and "✓ " in out and "47s" in out
 assert "footstrike-api: https://" in out
 show("1. TTY creating -> ready", out, err, code)
 
-out, err, code = run("pr-42", "creating", list(records_ok), is_tty=False)
+out, err, code = run("pr-42", "creating", "my-feature", list(records_ok), is_tty=False)
 assert code is None
 assert "\r" not in out and "\x1b" not in out
 assert not any(f in out for f in ib.SPINNER_FRAMES)
@@ -86,7 +91,9 @@ records_old_server = [
         "urls": {"footstrike-api": "https://pr-9.preview.ethanswan.com"},
     },
 ]
-out, err, code = run("pr-9", "creating", list(records_old_server), is_tty=True)
+out, err, code = run(
+    "pr-9", "creating", "old-server-branch", list(records_old_server), is_tty=True
+)
 assert code is None and "\r" not in out and "  ready" in out
 show("2. Old-server fallback (no step key), TTY", out, err, code)
 
@@ -100,7 +107,9 @@ records_failed = [
         "error": "docker build exited 1: no space left on device",
     },
 ]
-out, err, code = run("pr-77", "creating", list(records_failed), is_tty=True)
+out, err, code = run(
+    "pr-77", "creating", "my-feature", list(records_failed), is_tty=True
+)
 assert code == 1
 assert "failed while building footstrike-api (1/2): docker build exited 1" in err
 assert "Check the Previews tab in bifrost for details." in err
@@ -108,7 +117,11 @@ show("3. Failed run, step + error present, TTY", out, err, code)
 
 # Legacy failed run, no step/error at all.
 out, err, code = run(
-    "pr-3", "creating", [{"phase": "creating"}, {"phase": "failed"}], is_tty=False
+    "pr-3",
+    "creating",
+    "my-feature",
+    [{"phase": "creating"}, {"phase": "failed"}],
+    is_tty=False,
 )
 assert code == 1 and "Preview pr-3 failed (phase: failed)." in err
 show("3b. Failed run, no step/error (old server), non-TTY", out, err, code)
@@ -121,7 +134,11 @@ show("3b. Failed run, no step/error (old server), non-TTY", out, err, code)
 # down, so this create can't proceed) and says what to do (retry once
 # teardown finishes), without speculating about why.
 out, err, code = run(
-    "training-plans", "creating", [{"phase": "terminating"}], is_tty=True
+    "training-plans",
+    "creating",
+    "training-plans",
+    [{"phase": "terminating"}],
+    is_tty=True,
 )
 assert code == 1
 assert "concurrent" not in err.lower(), "must not speculate about the cause"
@@ -163,7 +180,9 @@ records_naive_ts = [
         "urls": {"footstrike-api": "https://pr-5.preview.ethanswan.com"},
     },
 ]
-out, err, code = run("pr-5", "creating", list(records_naive_ts), is_tty=True)
+out, err, code = run(
+    "pr-5", "creating", "my-feature", list(records_naive_ts), is_tty=True
+)
 assert code is None, "a naive stepSince must not crash the poll loop"
 show("4b. wait_for_preview survives a naive stepSince mid-run", out, err, code)
 
@@ -526,6 +545,226 @@ row50 = next(line for line in no_busy_output.splitlines() if line.startswith("pr
 assert row50.split()[:4] == ["pr-50", "some-branch", "ready", "healthy"]
 print("\n=== 12. `ib preview list`: record with `busy` absent renders unchanged ===")
 print(no_busy_output)
+
+
+# 13. fail_if_branch_mismatch (the tag-collision fix): bifrost's tag
+# derivation is many-to-one, and the ErrTagCollision refusal happens
+# server-side in a detached goroutine after the 202 already returned, so
+# polling the tag afterward can show a *different* branch's preview sitting
+# at `ready`. fail_if_branch_mismatch is the client-side backstop -- tested
+# directly here the same way check_ttl_warning/check_auto_update_warning
+# (sections 7/9) test their sibling helpers.
+def check_branch_mismatch(requested_branch, record, tag, on_fail=None):
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = None
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            ib.fail_if_branch_mismatch(requested_branch, record, tag, on_fail=on_fail)
+        except SystemExit as e:
+            exit_code = e.code
+    return out.getvalue(), err.getvalue(), exit_code
+
+
+# 13a. Same branch -- the documented recovery path (re-run `up` on a branch
+# that already has a preview), and what --auto-update does every couple of
+# minutes -- must be a pure no-op: no output, exit unaffected.
+out, err, code = check_branch_mismatch(
+    "my-feature", {"tag": "pr-60", "branch": "my-feature"}, "pr-60"
+)
+assert out == "" and err == "" and code is None, (out, err, code)
+show("13a. Same branch: no-op, exit unaffected", out, err, code)
+
+# 13b. `branch` missing entirely -- an older preview predating the
+# `bifrost/branch` annotation, or a partial/failed run -- means "can't
+# tell". Must NOT raise a false alarm: that would be worse than the bug
+# this exists to catch.
+out, err, code = check_branch_mismatch("branch-b", {"tag": "pr-61"}, "pr-61")
+assert out == "" and err == "" and code is None, (out, err, code)
+show("13b. Missing `branch` on the record: no false alarm", out, err, code)
+
+# 13c. `branch` present but empty string -- same "can't tell" treatment as
+# missing entirely, not a mismatch against a non-empty requested branch.
+out, err, code = check_branch_mismatch(
+    "branch-b", {"tag": "pr-61", "branch": ""}, "pr-61"
+)
+assert out == "" and err == "" and code is None, (out, err, code)
+show("13c. Empty-string `branch` on the record: no false alarm", out, err, code)
+
+# 13d. Differing branch -- the actual bug: tag pr-62 already belongs to
+# branch-a, this run asked for branch-b. Must fail nonzero, name BOTH
+# branches, and say what to do -- no speculation about *why* they collided
+# (same discipline as the terminating-phase message in 3c).
+out, err, code = check_branch_mismatch(
+    "branch-b", {"tag": "pr-62", "branch": "branch-a"}, "pr-62"
+)
+assert code == 1
+assert "branch-a" in err and "branch-b" in err and "pr-62" in err
+assert "ib preview down pr-62" in err
+assert "concurrent" not in err.lower(), "must not speculate about the cause"
+show("13d. Differing branch: nonzero exit, names both branches", out, err, code)
+print(f"verbatim message: {err.strip()!r}")
+
+# 13e. `on_fail` runs before the error is printed (wait_for_preview passes
+# its tty_clear closure here so a mismatch caught mid-poll doesn't leave a
+# half-drawn spinner line behind it).
+on_fail_ran = []
+out, err, code = check_branch_mismatch(
+    "branch-b",
+    {"tag": "pr-63", "branch": "branch-a"},
+    "pr-63",
+    on_fail=lambda: on_fail_ran.append(True),
+)
+assert on_fail_ran == [True] and code == 1
+show("13e. on_fail runs before the error is printed", out, err, code)
+
+
+# 14. Same behavior end-to-end through wait_for_preview's poll loop (not
+# just the helper) -- this is the path a real `ib preview up` without
+# --no-wait actually takes, and the poll loop sees records repeatedly, not
+# just once.
+#
+# 14a. Same branch on every polled record: proceeds to ready exactly like
+# section 1, unaffected by this fix.
+records_same_branch = [
+    {"phase": "creating", "branch": "same-branch", "step": "applying manifests"},
+    {
+        "phase": "ready",
+        "branch": "same-branch",
+        "urls": {"footstrike-api": "https://pr-80.preview.ethanswan.com"},
+    },
+]
+out, err, code = run(
+    "pr-80", "creating", "same-branch", list(records_same_branch), is_tty=True
+)
+assert code is None, "same branch on every record must not be treated as a collision"
+assert "footstrike-api: https://" in out
+show("14a. Poll loop, same branch throughout: proceeds to ready", out, err, code)
+
+# 14b. The real bug scenario: tag pr-81 already belongs to branch-a and is
+# already `ready` (bifrost's goroutine never touched it after refusing the
+# collision), this run asked for branch-b. Must fail instead of reporting
+# success with branch-a's URL.
+out, err, code = run(
+    "pr-81",
+    "creating",
+    "branch-b",
+    [
+        {
+            "phase": "ready",
+            "branch": "branch-a",
+            "urls": {"footstrike-api": "https://pr-81-branch-a.preview.ethanswan.com"},
+        }
+    ],
+    is_tty=True,
+)
+assert code == 1
+assert "branch-a" in err and "branch-b" in err
+assert "branch-a.preview.ethanswan.com" not in out, (
+    "must never print the OTHER branch's URL as if it were a success"
+)
+show("14b. Poll loop, colliding tag already ready under another branch", out, err, code)
+
+# 14c. Mismatch surfaces on a LATER poll, after a spinner line is already
+# drawn (TTY) -- confirms the spinner is cleared (via on_fail=tty_clear)
+# before the error prints, not left half-drawn on the same line.
+out, err, code = run(
+    "pr-82",
+    "creating",
+    "branch-b",
+    [
+        {"phase": "creating", "step": "resolving members: footstrike-api"},
+        {"phase": "ready", "branch": "branch-a", "urls": {}},
+    ],
+    is_tty=True,
+)
+assert code == 1
+assert "branch-a" in err and "branch-b" in err
+show("14c. Poll loop, mismatch surfaces after a spinner was drawn", out, err, code)
+
+
+# 15. The --no-wait path: preview_up(wait=False) does its own follow-up GET
+# (there's no poll loop to piggyback on), so it needs its own check. Drives
+# the real ib.preview_up() via its injectable `api` seam (same pattern as
+# wait_for_preview's poll/sleep/is_tty) rather than the network -- and this
+# also proves no extra network call happens beyond what's asserted (an
+# unconsumed/extra call raises loudly instead of silently returning stale
+# data).
+def run_preview_up_no_wait(branch, responses):
+    calls = list(responses)
+
+    def fake_preview_api(method: str, path: str, body: dict | None = None) -> dict:
+        if not calls:
+            raise AssertionError(f"unexpected extra preview_api call: {method} {path}")
+        return calls.pop(0)
+
+    out, err = io.StringIO(), io.StringIO()
+    exit_code = None
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            ib.preview_up(branch, wait=False, api=fake_preview_api)
+        except SystemExit as e:
+            exit_code = e.code
+    return out.getvalue(), err.getvalue(), exit_code
+
+
+# 15a. Same branch: proceeds through both the POST response check and the
+# follow-up GET check, reaches "Not waiting.", exit unaffected.
+out, err, code = run_preview_up_no_wait(
+    "my-feature",
+    [
+        {"tag": "pr-90", "phase": "ready", "branch": "my-feature"},  # POST
+        {"tag": "pr-90", "phase": "ready", "branch": "my-feature"},  # follow-up GET
+    ],
+)
+assert code is None and err == ""
+assert "Not waiting." in out
+show("15a. --no-wait, same branch: proceeds normally", out, err, code)
+
+# 15b. POST response already reveals the collision (bifrost's tag lookup
+# already had branch-a's ready record before this request's goroutine ever
+# ran) -- caught at the earliest possible point, before "Creating
+# preview..." even prints and before the follow-up GET is attempted (only
+# one canned response is provided; a second call would raise).
+out, err, code = run_preview_up_no_wait(
+    "branch-b",
+    [{"tag": "pr-91", "phase": "ready", "branch": "branch-a"}],  # POST only
+)
+assert code == 1
+assert "branch-a" in err and "branch-b" in err
+assert "Creating preview" not in out, "must bail before the 'Creating...' line"
+show("15b. --no-wait, POST response already reveals the collision", out, err, code)
+
+# 15c. POST response doesn't carry `branch` yet (e.g. an older bifrost, or
+# a fresh record from this run's own goroutine that hasn't started), so the
+# first check passes -- but the follow-up GET's record does. This is the
+# no-wait path's own dedicated check catching what the POST-time check
+# couldn't.
+out, err, code = run_preview_up_no_wait(
+    "branch-b",
+    [
+        {"tag": "pr-92", "phase": "creating"},  # POST: no branch info yet
+        {"tag": "pr-92", "phase": "ready", "branch": "branch-a"},  # follow-up GET
+    ],
+)
+assert code == 1
+assert "branch-a" in err and "branch-b" in err
+assert "Creating preview" in out, "POST-time check passed, so this line does print"
+assert "Not waiting." not in out, "must bail before claiming success"
+show("15c. --no-wait, collision only visible on the follow-up GET", out, err, code)
+
+# 15d. `branch` absent from both the POST and follow-up GET responses --
+# must not false-alarm; reaches "Not waiting." same as any pre-annotation
+# bifrost.
+out, err, code = run_preview_up_no_wait(
+    "some-branch",
+    [
+        {"tag": "pr-93", "phase": "ready"},
+        {"tag": "pr-93", "phase": "ready"},
+    ],
+)
+assert code is None and err == ""
+assert "Not waiting." in out
+show("15d. --no-wait, branch absent throughout: no false alarm", out, err, code)
 
 
 print("\nAll scenarios passed.")
