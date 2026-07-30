@@ -548,7 +548,7 @@ bifrost_prod_builds_viewer = projects.IAMMember(
     member=bifrost_prod_sa.email.apply(lambda email: f"serviceAccount:{email}"),
 )
 
-# Preview orchestration (prod bifrost only): running a {repo}-preview-build
+# Preview orchestration (prod bifrost only): running a {registry key}-preview-build
 # trigger needs cloudbuild.builds.create, which the viewer role above lacks —
 # builds.editor is the narrowest predefined role that grants it. The triggers
 # also pin service_account=cloud_build_sa, so the caller must additionally be
@@ -773,14 +773,24 @@ bifrost_build = cloudbuild.Trigger(
 )
 
 # Preview builds: manual-invocation triggers (no push event). Run with
-#   gcloud builds triggers run {repo}-preview-build --branch=<branch>
+#   gcloud builds triggers run {registry key}-preview-build --branch=<branch>
 # The build config is pinned to main's cloudbuild-preview.yaml; the build
 # *source* is whatever branch the run names. Note RunBuildTrigger accepts
 # no substitutions — preview builds are deliberately substitution-free.
-for preview_repo in ["footstrike-api", "footstrike-dashboard", "identity"]:
+#
+# The trigger *name* must match bifrost's internal/registry/registry.yaml key
+# for the service (what Orchestrator.TriggerIDs looks up), while the GitHub
+# *repo* the trigger builds from is that service's own repo — the two aren't
+# always equal (asset-manager's repo is asset_manager), so each is sourced
+# from its own element of the pair rather than one variable serving both.
+for preview_key, preview_repo in [
+    ("footstrike-api", "footstrike-api"),
+    ("footstrike-dashboard", "footstrike-dashboard"),
+    ("identity", "identity"),
+]:
     cloudbuild.Trigger(
-        f"{preview_repo}-preview-build",
-        name=f"{preview_repo}-preview-build",
+        f"{preview_key}-preview-build",
+        name=f"{preview_key}-preview-build",
         project=project,
         service_account=cloud_build_sa,
         source_to_build=cloudbuild.TriggerSourceToBuildArgs(
