@@ -1181,7 +1181,7 @@ monitoring.AlertPolicy(
             "Expected during the GKE maintenance window (08:00-12:00 UTC)"
             " while the single node upgrades.\n\n"
             "Triage: `kubectl get pods -A | grep -v Running`, then"
-            " `kubectl get pods -n cloudflared` and `ib status <app>`."
+            " `kubectl get pods -n cloudflared` and `bif status <app>`."
         ),
         "mime_type": "text/markdown",
     },
