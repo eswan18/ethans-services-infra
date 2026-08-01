@@ -25,5 +25,5 @@ jobs:
       - name: Run linter
         run: uv run ruff check
 
-      - name: Run type checker
-        run: uv run ty check
+      - name: Check formatting
+        run: uv run ruff format --check

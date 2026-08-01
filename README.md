@@ -38,17 +38,32 @@ pulumi up
 
 ## Deployment Helper
 
-The `ib.py` script helps manage staging-to-prod promotions via ArgoCD.
+**The deploy CLI has moved to the bifrost repo.** `ib.py` (and its companion
+check script `verify_preview_progress.py`) used to live here; they were ported
+to Go as `cmd/bif` in bifrost and deleted from this repo. Install it from a
+bifrost checkout:
 
 ```bash
-# Check deployment status for an app
-ib status footstrike-api
-
-# Check status for all services
-ib status --all
-
-# Promote staging to prod
-ib promote footstrike-api
+cd ../bifrost && make install   # go install ./cmd/bif
 ```
 
-The `status` command shows current image tags for both environments and whether they're in sync. If out of sync, it tells you the command to promote.
+Then `bif status`, `bif promote` and `bif preview` do what `ib status`,
+`ib promote` and `ib preview` did. See bifrost's `README.md` for the full
+command list, the exit-code contract, and the two places `bif` deliberately
+behaves differently from the Python it replaced.
+
+`bif status` and `bif promote` still work when bifrost itself is down — they
+talk to the cluster directly through client-go, never to bifrost's API, which
+is what makes `bif promote bifrost` the recovery path for bifrost. (`bif
+preview` is an HTTP client of bifrost's API, as `ib preview` was.)
+
+### The `SERVICES` list is no longer maintained here
+
+`ib.py` carried a hardcoded `SERVICES` list that duplicated bifrost's service
+registry on purpose: the CLI had to keep working with bifrost down, so it could
+not fetch the list over the network. `bif` reads bifrost's
+`internal/registry/registry.yaml`, which is `//go:embed`ed into the binary —
+compiled in, not fetched — so the offline property survives without the
+duplicate. **Adding a service to the fleet no longer requires an edit in this
+repo.** Add the registry entry in bifrost; see its
+`docs/adding-a-service.md`.

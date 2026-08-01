@@ -857,9 +857,7 @@ for env, env_config in pubsub_config.items():
             project=project,
             topic=topic.name,
             role="roles/pubsub.publisher",
-            member=publisher_sa.email.apply(
-                lambda email: f"serviceAccount:{email}"
-            ),
+            member=publisher_sa.email.apply(lambda email: f"serviceAccount:{email}"),
         )
 
     subscriber_sa = env_config["subscriber_sa"]
@@ -878,9 +876,7 @@ for env, env_config in pubsub_config.items():
             project=project,
             subscription=subscription.name,
             role="roles/pubsub.subscriber",
-            member=subscriber_sa.email.apply(
-                lambda email: f"serviceAccount:{email}"
-            ),
+            member=subscriber_sa.email.apply(lambda email: f"serviceAccount:{email}"),
         )
 
 # ArgoCD (Helm)

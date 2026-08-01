@@ -4,4 +4,3 @@ venv/
 .venv/
 .DS_Store
 Pulumi.*.secrets.yaml
-*.egg-info/
