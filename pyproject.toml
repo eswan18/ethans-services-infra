@@ -12,9 +12,6 @@ dependencies = [
     "pulumi-kubernetes>=4.0.0,<5.0.0",
 ]
 
-[project.scripts]
-ib = "ib:main"
-
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 
