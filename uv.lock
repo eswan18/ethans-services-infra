@@ -103,7 +103,7 @@ wheels = [
 [[package]]
 name = "ethans-services-infra"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "pulumi" },
     { name = "pulumi-gcp" },
