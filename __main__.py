@@ -415,12 +415,6 @@ secret_access = {
     "fitness-api-prod": (
         fitness_api_prod_sa,
         [
-            "fitness_api_prod_database_url",
-            "fitness_api_prod_google_client_id",
-            "fitness_api_prod_google_client_secret",
-            "fitness_api_prod_oauth_state_secret",
-            "fitness_api_prod_r2_access_key_id",
-            "fitness_api_prod_r2_secret_access_key",
             "footstrike_api_prod_database_url",
             "footstrike_api_prod_google_client_id",
             "footstrike_api_prod_google_client_secret",
@@ -433,12 +427,6 @@ secret_access = {
     "fitness-api-staging": (
         fitness_api_staging_sa,
         [
-            "fitness_api_staging_database_url",
-            "fitness_api_staging_google_client_id",
-            "fitness_api_staging_google_client_secret",
-            "fitness_api_staging_oauth_state_secret",
-            "fitness_api_staging_r2_access_key_id",
-            "fitness_api_staging_r2_secret_access_key",
             "footstrike_api_staging_database_url",
             "footstrike_api_staging_google_client_id",
             "footstrike_api_staging_google_client_secret",
@@ -583,21 +571,7 @@ bifrost_prod_act_as_cloud_build_sa = serviceaccount.IAMMember(
 
 # Secret Manager secrets (structure only - values managed outside Pulumi)
 secret_names = [
-    # fitness-api prod
-    "fitness_api_prod_database_url",
-    "fitness_api_prod_google_client_id",
-    "fitness_api_prod_google_client_secret",
-    "fitness_api_prod_oauth_state_secret",
-    "fitness_api_prod_r2_access_key_id",
-    "fitness_api_prod_r2_secret_access_key",
-    # fitness-api staging
-    "fitness_api_staging_database_url",
-    "fitness_api_staging_google_client_id",
-    "fitness_api_staging_google_client_secret",
-    "fitness_api_staging_oauth_state_secret",
-    "fitness_api_staging_r2_access_key_id",
-    "fitness_api_staging_r2_secret_access_key",
-    # footstrike-api prod (new names; the fitness_api_ pair is retired after cutover)
+    # footstrike-api prod
     "footstrike_api_prod_database_url",
     "footstrike_api_prod_google_client_id",
     "footstrike_api_prod_google_client_secret",
@@ -605,7 +579,7 @@ secret_names = [
     "footstrike_api_prod_r2_access_key_id",
     "footstrike_api_prod_r2_secret_access_key",
     "footstrike_api_prod_credential_encryption_key",
-    # footstrike-api staging (new names; the fitness_api_ pair is retired after cutover)
+    # footstrike-api staging
     "footstrike_api_staging_database_url",
     "footstrike_api_staging_google_client_id",
     "footstrike_api_staging_google_client_secret",
