@@ -817,6 +817,7 @@ for preview_key, preview_repo in [
     ("footstrike-api", "footstrike-api"),
     ("footstrike-dashboard", "footstrike-dashboard"),
     ("identity", "identity"),
+    ("forecasting", "forecasting"),
 ]:
     cloudbuild.Trigger(
         f"{preview_key}-preview-build",
