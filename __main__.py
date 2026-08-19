@@ -411,6 +411,25 @@ bifrost_staging_wi = serviceaccount.IAMMember(
 
 # Secret Manager access (per-secret IAM bindings)
 # Maps each service account to the secrets it needs access to.
+#
+# Both the dict keys here and the strings in secret_names below are Pulumi
+# RESOURCE-NAME ANCHORS, not labels — renaming one is a destroy-and-recreate,
+# not an edit:
+#
+#   - A key here feeds `f"{env_key}-access-{secret_name}"`, so renaming it
+#     replaces that service account's IAM bindings. Recoverable, but it briefly
+#     revokes the running app's access to its own secrets.
+#   - A string in secret_names is passed as both the Pulumi resource name and
+#     the secret_id, so renaming it DESTROYS the secret and every version in
+#     it. Secret Manager has no undelete.
+#
+# The Aug 2026 fitness_api_* -> footstrike_api_* rename is the worked example:
+# it could not be done by editing these strings. It took five phases — create
+# the new secrets alongside the old, copy each value with a digest check,
+# repoint the SecretProviderClasses, soak, and only then delete the originals.
+# The keys below still read `fitness-api-*` because the service accounts really
+# are named `fitness-api-{env}-sa`; that one is a deliberate keep, not a
+# leftover.
 secret_access = {
     "fitness-api-prod": (
         fitness_api_prod_sa,

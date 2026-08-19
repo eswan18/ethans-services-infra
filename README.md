@@ -18,7 +18,13 @@ Infrastructure as code for Ethan's services, using Pulumi with Python on GCP.
 
 - **Secret Manager** secrets for each service/environment
 
-- **Cloud Build Triggers** for CI/CD (fitness-api, fitness-dashboard, identity)
+- **Cloud Build Triggers** for CI/CD: one `{service}-build` per service pushing to
+  `main` (asset-manager, bifrost, comms, footstrike-api, footstrike-dashboard,
+  forecasting, identity), plus a manual `{service}-preview-build` for each service
+  onboarded to preview environments, which bifrost invokes to build a branch.
+  Preview triggers are named after the **bifrost registry key**, not the repo —
+  the two differ for asset-manager (`asset_manager`), and a trigger named after
+  the repo is one bifrost would never find.
 
 ## Prerequisites
 
