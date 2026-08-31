@@ -984,6 +984,22 @@ csi_secrets_store_release = k8s.helm.v3.Release(
     opts=pulumi.ResourceOptions(provider=k8s_provider),
 )
 
+# Secret Manager CSI provider plugin (GCP). Vendored verbatim from upstream's
+# deploy/provider-gcp-plugin.yaml at v1.17.0: Google publishes no Helm chart
+# for it, so the raw manifest is the supported install path. To bump, re-fetch
+# the file at the new tag and `pulumi up` (see README).
+#
+# depends_on is load-bearing on a fresh cluster: the plugin registers its
+# socket in the directory the driver watches, so the driver must exist first.
+csi_provider_gcp = k8s.yaml.v2.ConfigFile(
+    "csi-secrets-store-provider-gcp",
+    file="k8s/secrets-store-csi-driver-provider-gcp.yaml",
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[csi_secrets_store_release],
+    ),
+)
+
 # Tailscale Operator (Helm)
 tailscale_operator_release = k8s.helm.v3.Release(
     "tailscale-operator",

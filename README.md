@@ -26,6 +26,15 @@ Infrastructure as code for Ethan's services, using Pulumi with Python on GCP.
   the two differ for asset-manager (`asset_manager`), and a trigger named after
   the repo is one bifrost would never find.
 
+- **Secret Manager CSI stack** — how pods get their secrets
+  - `secrets-store-csi-driver` (upstream Helm chart)
+  - `secrets-store-csi-driver-provider-gcp` (vendored manifest, see below)
+
+  Every service's `SecretProviderClass` goes through both. If the provider is
+  down, pods that are already running keep their mounted secrets, but any pod
+  that *starts* will fail to mount until it is back.
+
+
 ## Prerequisites
 
 - `gcloud` authenticated with access to the `ethans-services` project
@@ -41,6 +50,36 @@ pulumi preview
 # Deploy changes
 pulumi up
 ```
+
+## Bumping the Secret Manager CSI provider
+
+Google publishes no Helm chart for the GCP provider plugin, so
+`k8s/secrets-store-csi-driver-provider-gcp.yaml` is upstream's
+`deploy/provider-gcp-plugin.yaml` vendored **verbatim** — no local edits, which
+is what keeps a bump to a one-line diff:
+
+```bash
+TAG=v1.18.0   # whatever is newest
+curl -sSf -o k8s/secrets-store-csi-driver-provider-gcp.yaml \
+  "https://raw.githubusercontent.com/GoogleCloudPlatform/secrets-store-csi-driver-provider-gcp/$TAG/deploy/provider-gcp-plugin.yaml"
+git diff      # expect the image digest to change, and nothing else
+pulumi up
+```
+
+Upstream pins the image by digest, so that digest line *is* the version. Check
+the [changelog][csi-changelog] first; everything through v1.17.0 has been Go and
+dependency bumps with no breaking changes.
+
+**Don't let this drift.** Google deprecates old plugin images in Artifact
+Registry by retagging them `deprecated-public-image-*`, and eventually removes
+them. Because the DaemonSet uses `imagePullPolicy: IfNotPresent`, a pulled image
+keeps working on a node that already cached it and fails only when a *new* node
+tries to pull it — so the failure surfaces at node replacement, taking down
+secret mounting for every service at the least convenient moment. GCP emails an
+advisory when a version goes deprecated.
+
+[csi-changelog]: https://github.com/GoogleCloudPlatform/secrets-store-csi-driver-provider-gcp/blob/main/CHANGELOG.md
+
 
 ## Deployment Helper
 
