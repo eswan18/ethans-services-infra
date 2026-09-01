@@ -906,6 +906,31 @@ for env, env_config in pubsub_config.items():
             member=subscriber_sa.email.apply(lambda email: f"serviceAccount:{email}"),
         )
 
+# Namespaces for the Helm releases that do not create their own. cert-manager
+# and ingress-nginx pass create_namespace=True; argocd, argocd-image-updater
+# and tailscale-operator do not -- and Helm will not install into a namespace
+# that does not exist. Without these two resources a from-scratch `pulumi up`
+# fails outright, which made "step 2 creates the Tailscale operator release" in
+# the bootstrap runbook untrue: someone had to hand-create both namespaces
+# first, and nothing said so.
+#
+# Adopted by import rather than recreated: deleting either would take ArgoCD or
+# the entire tailnet ingress with it.
+argocd_namespace = k8s.core.v1.Namespace(
+    "argocd",
+    metadata={"name": "argocd"},
+    opts=pulumi.ResourceOptions(provider=k8s_provider, import_="argocd"),
+)
+
+tailscale_namespace = k8s.core.v1.Namespace(
+    "tailscale",
+    # The `name` label is already on the live namespace; declaring it keeps the
+    # import clean. (`kubernetes.io/metadata.name` is server-added, so Pulumi
+    # tolerates it undeclared.)
+    metadata={"name": "tailscale", "labels": {"name": "tailscale"}},
+    opts=pulumi.ResourceOptions(provider=k8s_provider, import_="tailscale"),
+)
+
 # ArgoCD (Helm)
 argocd_release = k8s.helm.v3.Release(
     "argocd",
@@ -949,7 +974,10 @@ argocd_release = k8s.helm.v3.Release(
         "notifications": {"enabled": False},
         "applicationSet": {"enabled": False},
     },
-    opts=pulumi.ResourceOptions(provider=k8s_provider),
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[argocd_namespace],
+    ),
 )
 
 argocd_image_updater_release = k8s.helm.v3.Release(
@@ -965,7 +993,10 @@ argocd_image_updater_release = k8s.helm.v3.Release(
             "requests": {"cpu": "5m", "memory": "32Mi"},
         },
     },
-    opts=pulumi.ResourceOptions(provider=k8s_provider),
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[argocd_namespace],
+    ),
 )
 
 
@@ -1101,7 +1132,10 @@ tailscale_operator_release = k8s.helm.v3.Release(
             "defaultTags": ["tag:k8s-operator", "tag:k8s"],
         },
     },
-    opts=pulumi.ResourceOptions(provider=k8s_provider),
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[tailscale_namespace],
+    ),
 )
 
 # cert-manager (Helm): browser-valid TLS for custom-domain staging hosts
