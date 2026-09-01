@@ -41,6 +41,11 @@ Infrastructure as code for Ethan's services, using Pulumi with Python on GCP.
   in-cluster connector is managed here.
 
 
+- **Monitoring** — uptime checks against each prod health endpoint, the email
+  notification channel, and both alert policies (`Pod Crash Loop`,
+  `Prod Uptime Check Failure`).
+
+
 ## Prerequisites
 
 - `gcloud` authenticated with access to the `ethans-services` project
