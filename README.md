@@ -35,6 +35,12 @@ Infrastructure as code for Ethan's services, using Pulumi with Python on GCP.
   that *starts* will fail to mount until it is back.
 
 
+- **cloudflared** — the Cloudflare Tunnel connector (Deployment + namespace +
+  token secret) that carries every prod public hostname. The tunnel itself and
+  its hostname routing stay in the Cloudflare Zero Trust dashboard; only the
+  in-cluster connector is managed here.
+
+
 ## Prerequisites
 
 - `gcloud` authenticated with access to the `ethans-services` project

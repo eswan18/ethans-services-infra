@@ -1143,6 +1143,88 @@ ingress_nginx_release = k8s.helm.v3.Release(
     ),
 )
 
+# cloudflared: the Cloudflare Tunnel connector carrying every prod public
+# hostname (*.ethanswan.com, footstrike.run, api.footstrike.run). It dials out
+# to Cloudflare's edge, so there is no inbound LoadBalancer here to secure.
+#
+# Hand-applied and tracked nowhere until Aug 2026, which made it the quietest
+# hole in a rebuild: every service would come up healthy and simply be
+# unreachable from the internet, with nothing failing to point at the cause.
+#
+# Only the in-cluster connector is IaC. The tunnel itself, its public-hostname
+# routing, and the DNS records live in the Cloudflare Zero Trust dashboard as
+# remotely-managed config, and a rebuild still needs those recreated by hand.
+cloudflared_namespace = k8s.core.v1.Namespace(
+    "cloudflared",
+    metadata={"name": "cloudflared"},
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        # Adopted from the hand-applied original instead of recreated: deleting
+        # this namespace would take every prod hostname down with it. Safe to
+        # drop this option once the import has landed in state.
+        import_="cloudflared",
+    ),
+)
+
+cloudflared_token_secret = k8s.core.v1.Secret(
+    "cloudflared-token",
+    metadata={"name": "cloudflared-token", "namespace": "cloudflared"},
+    string_data={"token": config.require_secret("cloudflared-tunnel-token")},
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[cloudflared_namespace],
+    ),
+)
+
+cloudflared_deployment = k8s.apps.v1.Deployment(
+    "cloudflared",
+    metadata={"name": "cloudflared", "namespace": "cloudflared"},
+    spec={
+        "replicas": 2,
+        "selector": {"match_labels": {"app": "cloudflared"}},
+        "template": {
+            "metadata": {"labels": {"app": "cloudflared"}},
+            "spec": {
+                "containers": [
+                    {
+                        "name": "cloudflared",
+                        "image": "cloudflare/cloudflared:latest",
+                        "args": [
+                            "tunnel",
+                            "--no-autoupdate",
+                            "run",
+                            "--token",
+                            "$(TUNNEL_TOKEN)",
+                        ],
+                        "env": [
+                            {
+                                "name": "TUNNEL_TOKEN",
+                                "value_from": {
+                                    "secret_key_ref": {
+                                        "name": "cloudflared-token",
+                                        "key": "token",
+                                    },
+                                },
+                            },
+                        ],
+                        # Steady state measures 6m CPU / 24Mi. These requests
+                        # exist mainly to get off BestEffort QoS: without them
+                        # the connector for all prod ingress is the first pod
+                        # evicted under node memory pressure.
+                        "resources": {
+                            "requests": {"cpu": "10m", "memory": "64Mi"},
+                        },
+                    },
+                ],
+            },
+        },
+    },
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[cloudflared_token_secret],
+    ),
+)
+
 # Uptime checks: probe each prod app's health endpoint through the full public
 # path (Cloudflare edge -> tunnel -> cloudflared -> service -> pod), catching
 # outages the in-cluster restart alert can't see. US-only; the API requires a
