@@ -38,7 +38,10 @@ Infrastructure as code for Ethan's services, using Pulumi with Python on GCP.
 - **cloudflared** — the Cloudflare Tunnel connector (Deployment + namespace +
   token secret) that carries every prod public hostname. The tunnel itself and
   its hostname routing stay in the Cloudflare Zero Trust dashboard; only the
-  in-cluster connector is managed here.
+  in-cluster connector is managed here. The live routing is transcribed in
+  [`docs/cloudflare-tunnel.md`](docs/cloudflare-tunnel.md), which is the
+  recovery input after a rebuild — and is regenerated from the cluster, not
+  the dashboard.
 
 
 - **Monitoring** — uptime checks against each prod health endpoint, the email
