@@ -8,3 +8,5 @@ config:
     secure: AAABAO2c9XBb3UnWFHH3b3KtxQ13ofzMH4MVE/qiev60PdhsG/0t6hFNuwJOEdSsxTzRv4mzMLjH5uIUg0adXTIgk8Zy1Y93QwVIYuP5YfIc+gTbPw==
   ethans-services-infra:cloudflared-tunnel-token:
     secure: AAABAKFmwVP6LiHzL+N3DmBUXfysKZIuwCzjiDnHhUOsrLT7e5DQ6K4fpNXGssLRrzb0hP7dZmR7OJsMKhyQqWvdyMeuxgwQqUJPHdTaQ3/mVimRk6y2y3gdyFBzOikP2XDiz/SD8YG2OnINvO2Ifg52I8GndAJwtiQB4gVyI67eAuixFcnCP1Eqq3WSdGYzknCr3WU95Bu+UcifTwN1d+MOX+ofI5mck52gdfnP6HljHcthjSm2mUPk0lM10B0VVB0XSyzGFFeoyG6FJoh0bwPReZjm0V5E
+  ethans-services-infra:github-repocreds-pat:
+    secure: AAABAHbD/o65Dwyyq6pwJlAXtF5iAO1OqGQ+NCDLo3NRVacQPwCMzrD5kp0ja1uDLzC4pQqooucgdmLskejnVTEJ8f2ores9qTwgaQzBZ2kqmoMy4IQRCDdw473TgqlSWb/gOYOmYMpps1g0E4SB+eQ5me4TVJjCs/HVSDI=
