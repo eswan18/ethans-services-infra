@@ -1,5 +1,8 @@
 """Infrastructure for Ethan's Services in GCP"""
 
+import base64
+import json
+
 import pulumi
 from pulumi_gcp import (
     container,
@@ -965,6 +968,86 @@ argocd_image_updater_release = k8s.helm.v3.Release(
     opts=pulumi.ResourceOptions(provider=k8s_provider),
 )
 
+
+# Registry credentials for argocd-image-updater. Pulumi mints the service
+# account key itself rather than adopting the hand-made one, which is what
+# makes this the one bootstrap secret with no human step at all: a rebuild goes
+# SA -> key -> secret with nothing to hand-carry. The Feb 2026 USER_MANAGED key
+# on this SA should be deleted once this is live.
+argocd_image_updater_key = serviceaccount.Key(
+    "argocd-image-updater-key",
+    service_account_id=argocd_image_updater_sa.name,
+)
+
+
+def _gar_docker_config(b64_private_key: str) -> str:
+    """Render a dockerconfigjson for Artifact Registry from a SA key.
+
+    `serviceaccount.Key.private_key` is the base64-encoded key *file*; Artifact
+    Registry wants the decoded JSON as the password, under the literal username
+    `_json_key`. The `auth` field is the same pair base64'd, which is what
+    clients that ignore username/password read instead.
+    """
+    key_json = base64.b64decode(b64_private_key).decode()
+    pair = base64.b64encode(f"_json_key:{key_json}".encode()).decode()
+    return json.dumps(
+        {
+            "auths": {
+                f"{region}-docker.pkg.dev": {
+                    "username": "_json_key",
+                    "password": key_json,
+                    "auth": pair,
+                }
+            }
+        }
+    )
+
+
+gar_pull_secret = k8s.core.v1.Secret(
+    "gar-pull-secret",
+    metadata={"name": "gar-pull-secret", "namespace": "argocd"},
+    type="kubernetes.io/dockerconfigjson",
+    string_data={
+        ".dockerconfigjson": argocd_image_updater_key.private_key.apply(
+            _gar_docker_config
+        )
+    },
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[argocd_image_updater_release],
+    ),
+)
+
+# ArgoCD's credential template for the private eswan18 repos (footstrike-api
+# and footstrike-dashboard went private in July 2026). Without it every
+# affected Application reports a ComparisonError -- "failed to list refs:
+# authentication required: Repository not found" -- and syncs stop silently
+# while `bif promote` appears to do nothing: it still writes the image
+# override, ArgoCD just cannot render manifests to apply it.
+#
+# The PAT expires and Pulumi does not fix that. It only makes renewal
+# `pulumi config set --secret github-repocreds-pat` + `pulumi up` rather than a
+# hand-rolled `kubectl create secret`.
+github_repocreds_secret = k8s.core.v1.Secret(
+    "github-eswan18-repocreds",
+    metadata={
+        "name": "github-eswan18-repocreds",
+        "namespace": "argocd",
+        # This label is what makes ArgoCD treat the secret as a credential
+        # template rather than an inert Opaque secret.
+        "labels": {"argocd.argoproj.io/secret-type": "repo-creds"},
+    },
+    string_data={
+        "url": f"https://github.com/{github_owner}",
+        "username": github_owner,
+        "password": config.require_secret("github-repocreds-pat"),
+    },
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[argocd_release],
+    ),
+)
+
 # Secrets Store CSI Driver (Helm)
 csi_secrets_store_release = k8s.helm.v3.Release(
     "csi-secrets-store",
@@ -1157,13 +1240,10 @@ ingress_nginx_release = k8s.helm.v3.Release(
 cloudflared_namespace = k8s.core.v1.Namespace(
     "cloudflared",
     metadata={"name": "cloudflared"},
-    opts=pulumi.ResourceOptions(
-        provider=k8s_provider,
-        # Adopted from the hand-applied original instead of recreated: deleting
-        # this namespace would take every prod hostname down with it. Safe to
-        # drop this option once the import has landed in state.
-        import_="cloudflared",
-    ),
+    # Adopted from the hand-applied original rather than recreated (Aug 2026):
+    # deleting this namespace would have taken every prod hostname with it. The
+    # import_ option that did the adopting has served its purpose and is gone.
+    opts=pulumi.ResourceOptions(provider=k8s_provider),
 )
 
 cloudflared_token_secret = k8s.core.v1.Secret(
@@ -1259,10 +1339,12 @@ for app, (host, path) in prod_health_checks.items():
         },
     )
 
-# The email channel every alert routes to. Imported, never created: a freshly
-# created email channel starts unverified, and an unverified channel accepts
-# alerts and silently delivers nothing until someone clicks a link in a
-# confirmation mail. Importing the console-made one sidesteps that entirely.
+# The email channel every alert routes to. The console-made original was
+# adopted by import in Aug 2026 rather than replaced, because a NEW email
+# channel starts unverified, and an unverified channel accepts alerts and
+# silently delivers nothing until someone clicks a link in a confirmation mail.
+# That still applies to a from-scratch rebuild, where this resource does get
+# created: verify it by mail or the cluster is unmonitored while looking fine.
 #
 # This replaces a hardcoded channel ID, which was a bootstrap landmine: on a
 # fresh project that ID resolves to nothing, so `pulumi up` failed outright
@@ -1274,10 +1356,6 @@ alert_email_channel = monitoring.NotificationChannel(
     project=project,
     labels={"email_address": "ethanpswan@gmail.com"},
     enabled=True,
-    opts=pulumi.ResourceOptions(
-        # Safe to drop once the import has landed in state.
-        import_="projects/ethans-services/notificationChannels/15094861386382175881",
-    ),
 )
 
 # One policy covers all uptime checks (grouped by host, so each app alerts
@@ -1326,11 +1404,12 @@ monitoring.AlertPolicy(
     },
 )
 
-# Transcribed verbatim from the console-created policy and imported, not
-# recreated: this alert has been live since Feb 2026 and rebuilding it would
-# have meant a window with no crash-loop alerting at all. The filter spacing,
-# the 0s duration and the 3-day autoClose are the console's, kept byte-for-byte
-# so the import lands clean rather than as an update.
+# Transcribed verbatim from the console-created policy, which was then adopted
+# by import rather than rebuilt: this alert has been live since Feb 2026 and
+# replacing it would have meant a window with no crash-loop alerting. The odd
+# filter spacing, the 0s duration and the 3-day autoClose are the console's
+# own, kept byte-for-byte so that import landed as an import, not an update.
+# Leave them alone unless you mean to change the alert.
 monitoring.AlertPolicy(
     "pod-crash-loop-alert",
     display_name="Pod Crash Loop",
@@ -1375,10 +1454,6 @@ monitoring.AlertPolicy(
         "mime_type": "text/markdown",
         "subject": "GCP Pod Crash Loop",
     },
-    opts=pulumi.ResourceOptions(
-        # Safe to drop once the import has landed in state.
-        import_="projects/ethans-services/alertPolicies/5997182044363617432",
-    ),
 )
 
 # Export cluster info

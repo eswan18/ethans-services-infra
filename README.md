@@ -45,6 +45,12 @@ Infrastructure as code for Ethan's services, using Pulumi with Python on GCP.
   notification channel, and both alert policies (`Pod Crash Loop`,
   `Prod Uptime Check Failure`).
 
+- **ArgoCD bootstrap secrets** (namespace `argocd`) — `gar-pull-secret` for
+  Artifact Registry (Pulumi mints the service-account key itself, so there is
+  nothing to hand-carry) and `github-eswan18-repocreds`, the credential
+  template for the private `eswan18` repos. The latter's PAT **expires**;
+  renew with `pulumi config set --secret github-repocreds-pat` + `pulumi up`.
+
 
 ## Prerequisites
 
