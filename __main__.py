@@ -1259,12 +1259,29 @@ for app, (host, path) in prod_health_checks.items():
         },
     )
 
-# One policy covers all uptime checks (grouped by host, so each app alerts
-# independently and future checks are included automatically). Reuses the
-# manually-created email channel that the Pod Crash Loop policy also uses.
-alert_email_channel = (
-    "projects/ethans-services/notificationChannels/15094861386382175881"
+# The email channel every alert routes to. Imported, never created: a freshly
+# created email channel starts unverified, and an unverified channel accepts
+# alerts and silently delivers nothing until someone clicks a link in a
+# confirmation mail. Importing the console-made one sidesteps that entirely.
+#
+# This replaces a hardcoded channel ID, which was a bootstrap landmine: on a
+# fresh project that ID resolves to nothing, so `pulumi up` failed outright
+# until someone hand-edited this file.
+alert_email_channel = monitoring.NotificationChannel(
+    "alert-email",
+    display_name="ethanpswan@gmail.com",
+    type="email",
+    project=project,
+    labels={"email_address": "ethanpswan@gmail.com"},
+    enabled=True,
+    opts=pulumi.ResourceOptions(
+        # Safe to drop once the import has landed in state.
+        import_="projects/ethans-services/notificationChannels/15094861386382175881",
+    ),
 )
+
+# One policy covers all uptime checks (grouped by host, so each app alerts
+# independently and future checks are included automatically).
 
 monitoring.AlertPolicy(
     "prod-uptime-alert",
@@ -1294,7 +1311,7 @@ monitoring.AlertPolicy(
             },
         }
     ],
-    notification_channels=[alert_email_channel],
+    notification_channels=[alert_email_channel.name],
     documentation={
         "content": (
             "A prod health endpoint has been failing its uptime check from"
@@ -1307,6 +1324,61 @@ monitoring.AlertPolicy(
         ),
         "mime_type": "text/markdown",
     },
+)
+
+# Transcribed verbatim from the console-created policy and imported, not
+# recreated: this alert has been live since Feb 2026 and rebuilding it would
+# have meant a window with no crash-loop alerting at all. The filter spacing,
+# the 0s duration and the 3-day autoClose are the console's, kept byte-for-byte
+# so the import lands clean rather than as an update.
+monitoring.AlertPolicy(
+    "pod-crash-loop-alert",
+    display_name="Pod Crash Loop",
+    project=project,
+    combiner="OR",
+    enabled=True,
+    conditions=[
+        {
+            "display_name": "Kubernetes Container - Restart count",
+            "condition_threshold": {
+                "filter": (
+                    'resource.type = "k8s_container" AND metric.type ='
+                    ' "kubernetes.io/container/restart_count"'
+                ),
+                "aggregations": [
+                    {
+                        "alignment_period": "300s",
+                        "per_series_aligner": "ALIGN_DELTA",
+                    }
+                ],
+                "comparison": "COMPARISON_GT",
+                "threshold_value": 1,
+                "duration": "0s",
+                "trigger": {"count": 1},
+            },
+        }
+    ],
+    notification_channels=[alert_email_channel.name],
+    alert_strategy={
+        "auto_close": "259200s",
+        "notification_prompts": ["OPENED"],
+    },
+    documentation={
+        "content": (
+            "A pod in the cluster has restarted multiple times, indicating a"
+            " possible crash loop.\n\nTo find the problem pod:\nkubectl get"
+            " pods -A | grep -v Running\n\nTo see recent events:\nkubectl get"
+            " events -A --sort-by='.lastTimestamp' | tail -20\n\nTo get logs"
+            " from the crashing container:\nkubectl logs -n <namespace>"
+            " <pod-name> --previous"
+        ),
+        "mime_type": "text/markdown",
+        "subject": "GCP Pod Crash Loop",
+    },
+    opts=pulumi.ResourceOptions(
+        # Safe to drop once the import has landed in state.
+        import_="projects/ethans-services/alertPolicies/5997182044363617432",
+    ),
 )
 
 # Export cluster info
