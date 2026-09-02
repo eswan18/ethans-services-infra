@@ -1139,10 +1139,21 @@ tailscale_operator_release = k8s.helm.v3.Release(
 )
 
 # cert-manager (Helm): browser-valid TLS for custom-domain staging hosts
-# (*.staging.footstrike.run) that stay tailnet-only. Issuance uses Let's
-# Encrypt DNS-01 through the Cloudflare API, so it never needs public
-# reachability. The API token lives in Pulumi config (cloudflare-dns-api-token,
-# scoped to Zone:DNS:Edit on the footstrike.run zone only).
+# (*.staging.footstrike.run, staging.haruspex.fyi) that stay tailnet-only.
+# Issuance uses Let's Encrypt DNS-01 through the Cloudflare API, so it never
+# needs public reachability.
+#
+# One API token per zone, each a Pulumi config secret, each scoped to just its
+# own zone: a leaked token can then only touch the zone it belongs to, and
+# footstrike.run carries prod plus every preview environment.
+#
+#   cloudflare-dns-api-token           -> footstrike.run
+#   cloudflare-dns-api-token-haruspex  -> haruspex.fyi
+#
+# Both need Zone:DNS:Edit *and* Zone:Zone:Read — cert-manager resolves a zone
+# ID from the DNS name before it can write the _acme-challenge TXT record, and
+# Cloudflare's "Edit zone DNS" token template does not include the read.
+# Without it the challenge hangs rather than failing with a clear error.
 cert_manager_release = k8s.helm.v3.Release(
     "cert-manager",
     chart="cert-manager",
@@ -1174,6 +1185,21 @@ cloudflare_dns_token_secret = k8s.core.v1.Secret(
     ),
 )
 
+cloudflare_dns_token_haruspex_secret = k8s.core.v1.Secret(
+    "cloudflare-dns-token-haruspex",
+    metadata={
+        "name": "cloudflare-dns-token-haruspex",
+        "namespace": "cert-manager",
+    },
+    string_data={
+        "api-token": config.require_secret("cloudflare-dns-api-token-haruspex")
+    },
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[cert_manager_release],
+    ),
+)
+
 letsencrypt_dns01_issuer = k8s.apiextensions.CustomResource(
     "letsencrypt-dns01",
     api_version="cert-manager.io/v1",
@@ -1184,8 +1210,16 @@ letsencrypt_dns01_issuer = k8s.apiextensions.CustomResource(
             "email": "ethanpswan@gmail.com",
             "server": "https://acme-v02.api.letsencrypt.org/directory",
             "privateKeySecretRef": {"name": "letsencrypt-dns01-account-key"},
+            # One solver per zone, each with an explicit dnsZones selector so
+            # routing never rests on cert-manager's specificity rules: a
+            # selectorless solver matches everything, and pairing one with a
+            # selectored sibling makes which token gets used a question of
+            # precedence rather than of what is written here. A dnsZones entry
+            # covers the zone and all of its subdomains, so footstrike.run
+            # still carries *.preview.footstrike.run and the staging hosts.
             "solvers": [
                 {
+                    "selector": {"dnsZones": ["footstrike.run"]},
                     "dns01": {
                         "cloudflare": {
                             "apiTokenSecretRef": {
@@ -1193,14 +1227,29 @@ letsencrypt_dns01_issuer = k8s.apiextensions.CustomResource(
                                 "key": "api-token",
                             }
                         }
-                    }
-                }
+                    },
+                },
+                {
+                    "selector": {"dnsZones": ["haruspex.fyi"]},
+                    "dns01": {
+                        "cloudflare": {
+                            "apiTokenSecretRef": {
+                                "name": "cloudflare-dns-token-haruspex",
+                                "key": "api-token",
+                            }
+                        }
+                    },
+                },
             ],
         }
     },
     opts=pulumi.ResourceOptions(
         provider=k8s_provider,
-        depends_on=[cert_manager_release, cloudflare_dns_token_secret],
+        depends_on=[
+            cert_manager_release,
+            cloudflare_dns_token_secret,
+            cloudflare_dns_token_haruspex_secret,
+        ],
     ),
 )
 
