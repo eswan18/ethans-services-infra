@@ -35,13 +35,13 @@ recovery.
 | | |
 |---|---|
 | Tunnel ID | `444d86d4-1884-414d-a6bb-74c79e3fb2c8` |
-| Config version | 23 (as of 2026-09-01) |
+| Config version | 24 (as of 2026-09-02) |
 | WARP routing | disabled |
 | Credential | token in the `cloudflared-token` secret, sourced from the dashboard and stored as the Pulumi stack secret `cloudflared-tunnel-token` |
 
 ## Public hostnames
 
-Six, all proxied through Cloudflare to in-cluster Services over the tunnel.
+Seven, all proxied through Cloudflare to in-cluster Services over the tunnel.
 Recreate under **Networks → Tunnels → your tunnel → Public Hostname**.
 
 | Public hostname | Service URL |
@@ -50,15 +50,25 @@ Recreate under **Networks → Tunnels → your tunnel → Public Hostname**.
 | `api.footstrike.run` | `http://footstrike-api.footstrike-api-prod.svc.cluster.local:80` |
 | `identity.ethanswan.com` | `http://identity.identity-prod.svc.cluster.local` |
 | `assets.ethanswan.com` | `http://asset-manager.asset-manager-prod.svc.cluster.local` |
+| `haruspex.fyi` | `http://forecasting.forecasting-prod.svc.cluster.local` |
 | `forecasting.ethanswan.com` | `http://forecasting.forecasting-prod.svc.cluster.local` |
 | `bifrost.ethanswan.com` | `http://bifrost.bifrost-prod.svc.cluster.local` |
 
 Plus a catch-all rule returning `http_status:404` for anything unmatched.
 
-Two cosmetic notes: the `ethanswan.com` entries omit the explicit `:80` that
-the `footstrike.run` entries carry — functionally identical, since the Services
-listen on 80 and `http://` defaults there. And no entry sets `originRequest`
-overrides, so all six use Cloudflare's defaults.
+**`forecasting.ethanswan.com` and `haruspex.fyi` deliberately point at the same
+Service.** Forecasting moved to the `haruspex.fyi` apex in Sept 2026; the old
+hostname is kept only so its DNS record survives, because a Redirect Rule in the
+`ethanswan.com` zone 301s it (path-preserving) to the new domain. Redirect Rules
+run at the edge *before* origin selection, so requests to the old host never
+reach the tunnel and the duplicate route is inert. Deleting the hostname here
+would take the DNS record with it, and a name that does not resolve cannot be
+redirected — so leave it.
+
+Two cosmetic notes: the `ethanswan.com` and `haruspex.fyi` entries omit the
+explicit `:80` that the `footstrike.run` entries carry — functionally identical,
+since the Services listen on 80 and `http://` defaults there. And no entry sets
+`originRequest` overrides, so all seven use Cloudflare's defaults.
 
 ## DNS
 
@@ -67,7 +77,13 @@ Each hostname is a **proxied** record pointing at
 proxied, `dig` returns Cloudflare edge addresses (`104.21.x` / `172.67.x`)
 rather than the CNAME target — that is expected and not a misconfiguration.
 
-Zones: `footstrike.run` and `ethanswan.com`.
+Zones: `footstrike.run`, `ethanswan.com` and `haruspex.fyi`.
+
+`haruspex.fyi` also carries a **grey-cloud (DNS-only)** `staging` CNAME to
+`staging-ingress.tailc06f30.ts.net`, which has nothing to do with this tunnel —
+it is the shared Tailscale ingress path described under "Deliberately not
+exposed" below. Do not orange-cloud it: Cloudflare's edge cannot route to a
+tailnet address.
 
 ## Deliberately not exposed
 
