@@ -1396,7 +1396,7 @@ prod_health_checks = {
     "footstrike-dashboard": ("footstrike.run", "/health"),
     "footstrike-api": ("api.footstrike.run", "/health"),
     "identity": ("identity.ethanswan.com", "/health"),
-    "forecasting": ("forecasting.ethanswan.com", "/api/health"),
+    "forecasting": ("haruspex.fyi", "/api/health"),
     "asset-manager": ("assets.ethanswan.com", "/health"),
     "bifrost": ("bifrost.ethanswan.com", "/health"),
 }
