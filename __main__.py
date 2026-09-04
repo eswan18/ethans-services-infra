@@ -841,14 +841,14 @@ pubsub_config = {
             "footstrike-events-staging": fitness_api_staging_sa,
             "identity-events-staging": identity_staging_sa,
             "asset-events-staging": asset_manager_staging_sa,
-            "forecasting-events-staging": forecasting_staging_sa,
+            "haruspex-events-staging": forecasting_staging_sa,
         },
         "subscriber_sa": comms_staging_sa,
         "subscriptions": {
             "comms-staging-footstrike-sub": "footstrike-events-staging",
             "comms-staging-identity-sub": "identity-events-staging",
             "comms-staging-asset-sub": "asset-events-staging",
-            "comms-staging-forecasting-sub": "forecasting-events-staging",
+            "comms-staging-haruspex-sub": "haruspex-events-staging",
         },
     },
     "prod": {
@@ -856,14 +856,14 @@ pubsub_config = {
             "footstrike-events-prod": fitness_api_prod_sa,
             "identity-events-prod": identity_prod_sa,
             "asset-events-prod": asset_manager_prod_sa,
-            "forecasting-events-prod": forecasting_prod_sa,
+            "haruspex-events-prod": forecasting_prod_sa,
         },
         "subscriber_sa": comms_prod_sa,
         "subscriptions": {
             "comms-prod-footstrike-sub": "footstrike-events-prod",
             "comms-prod-identity-sub": "identity-events-prod",
             "comms-prod-asset-sub": "asset-events-prod",
-            "comms-prod-forecasting-sub": "forecasting-events-prod",
+            "comms-prod-haruspex-sub": "haruspex-events-prod",
         },
     },
 }
