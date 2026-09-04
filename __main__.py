@@ -755,11 +755,15 @@ asset_manager_build = cloudbuild.Trigger(
     project=project,
     service_account=cloud_build_sa,
 )
+# Trigger name stays "forecasting" (bifrost's registry key, the namespaces and
+# the ArgoCD apps all still use it); the GitHub repo it watches was renamed to
+# haruspex. Cloud Build matches push events by repo name, so this pair has to
+# disagree or the trigger never fires.
 forecasting_build = cloudbuild.Trigger(
     "forecasting-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
-        name="forecasting",
+        name="haruspex",
         owner=github_owner,
         push=cloudbuild.TriggerGithubPushArgs(
             branch="^main$",
@@ -813,7 +817,7 @@ for preview_key, preview_repo in [
     ("footstrike-api", "footstrike-api"),
     ("footstrike-dashboard", "footstrike-dashboard"),
     ("identity", "identity"),
-    ("forecasting", "forecasting"),
+    ("forecasting", "haruspex"),
 ]:
     cloudbuild.Trigger(
         f"{preview_key}-preview-build",
