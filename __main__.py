@@ -293,24 +293,12 @@ asset_manager_prod_sa = serviceaccount.Account(
     display_name="Asset Manager Prod Service Account",
     project=project,
 )
-forecasting_staging_sa = serviceaccount.Account(
-    "forecasting-staging-sa",
-    account_id="forecasting-staging-sa",
-    display_name="Forecasting Staging Service Account",
-    project=project,
-)
-forecasting_prod_sa = serviceaccount.Account(
-    "forecasting-prod-sa",
-    account_id="forecasting-prod-sa",
-    display_name="Forecasting Prod Service Account",
-    project=project,
-)
-# Phase 1 of the forecasting -> haruspex rename. Service accounts, secrets and
-# namespaces cannot be renamed in place, so the new identity is built alongside
-# the old one and both run until the Cloudflare cutover. Everything added for
-# the rename is additive: nothing here removes or mutates a forecasting-*
-# resource, so this apply cannot take the live service down. The forecasting-*
-# resources are deleted in a later phase, after the cutover is verified.
+# This service is named haruspex everywhere now. It was `forecasting` until
+# Sept 2026; the rename could not happen in place because service accounts,
+# secrets and namespaces have no rename operation, so the haruspex identity was
+# built alongside the old one, traffic was cut over, and the forecasting-*
+# resources were then deleted. Only forecasting_sentry_auth_token survives, and
+# only because Cloud Build reads it by name.
 haruspex_staging_sa = serviceaccount.Account(
     "haruspex-staging-sa",
     account_id="haruspex-staging-sa",
@@ -393,22 +381,6 @@ asset_manager_staging_wi = serviceaccount.IAMMember(
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[asset-manager-staging/asset-manager-staging-ksa]",
 )
-forecasting_prod_wi = serviceaccount.IAMMember(
-    "forecasting-prod-workload-identity",
-    service_account_id=forecasting_prod_sa.name,
-    role="roles/iam.workloadIdentityUser",
-    member=f"serviceAccount:{project}.svc.id.goog[forecasting-prod/forecasting-prod-ksa]",
-)
-forecasting_staging_wi = serviceaccount.IAMMember(
-    "forecasting-staging-workload-identity",
-    service_account_id=forecasting_staging_sa.name,
-    role="roles/iam.workloadIdentityUser",
-    member=f"serviceAccount:{project}.svc.id.goog[forecasting-staging/forecasting-staging-ksa]",
-)
-# The haruspex-* namespaces and KSAs do not exist yet -- they arrive with the
-# manifests in the next phase. Binding ahead of them is fine: workload identity
-# members are plain strings to IAM, not references, so this neither fails nor
-# grants anything until a pod actually runs under that KSA.
 haruspex_prod_wi = serviceaccount.IAMMember(
     "haruspex-prod-workload-identity",
     service_account_id=haruspex_prod_sa.name,
@@ -530,26 +502,6 @@ secret_access = {
             "asset_manager_staging_client_id",
             "asset_manager_staging_client_secret",
             "asset_manager_staging_secret_key",
-        ],
-    ),
-    "forecasting-prod": (
-        forecasting_prod_sa,
-        [
-            "forecasting_prod_database_url",
-            "forecasting_prod_jwt_secret",
-            "forecasting_prod_argon2_salt",
-            "forecasting_prod_idp_client_id",
-            "forecasting_prod_idp_client_secret",
-        ],
-    ),
-    "forecasting-staging": (
-        forecasting_staging_sa,
-        [
-            "forecasting_staging_database_url",
-            "forecasting_staging_jwt_secret",
-            "forecasting_staging_argon2_salt",
-            "forecasting_staging_idp_client_id",
-            "forecasting_staging_idp_client_secret",
         ],
     ),
     "haruspex-prod": (
@@ -687,18 +639,6 @@ secret_names = [
     "asset_manager_staging_client_id",
     "asset_manager_staging_client_secret",
     "asset_manager_staging_secret_key",
-    # forecasting prod
-    "forecasting_prod_database_url",
-    "forecasting_prod_jwt_secret",
-    "forecasting_prod_argon2_salt",
-    "forecasting_prod_idp_client_id",
-    "forecasting_prod_idp_client_secret",
-    # forecasting staging
-    "forecasting_staging_database_url",
-    "forecasting_staging_jwt_secret",
-    "forecasting_staging_argon2_salt",
-    "forecasting_staging_idp_client_id",
-    "forecasting_staging_idp_client_secret",
     # haruspex prod (rename phase 1; values copied from forecasting_prod_*)
     "haruspex_prod_database_url",
     "haruspex_prod_jwt_secret",
@@ -711,7 +651,8 @@ secret_names = [
     "haruspex_staging_argon2_salt",
     "haruspex_staging_idp_client_id",
     "haruspex_staging_idp_client_secret",
-    # forecasting build (used by Cloud Build, not the app)
+    # haruspex build (used by Cloud Build, not the app). Keeps its old name:
+    # cloudbuild.yaml names it literally, so it moves with the build-side rename.
     "forecasting_sentry_auth_token",
     # comms prod
     "comms_prod_resend_api_key",
@@ -821,10 +762,13 @@ asset_manager_build = cloudbuild.Trigger(
     project=project,
     service_account=cloud_build_sa,
 )
-# Trigger name stays "forecasting" (bifrost's registry key, the namespaces and
-# the ArgoCD apps all still use it); the GitHub repo it watches was renamed to
-# haruspex. Cloud Build matches push events by repo name, so this pair has to
-# disagree or the trigger never fires.
+# Trigger name stays "forecasting" because bifrost's registry key does -- it is
+# what Orchestrator.TriggerIDs looks up. The namespaces and ArgoCD apps that
+# also used to justify this are haruspex now, so bifrost is the only reason
+# left, and renaming these triggers is part of that same change. The GitHub
+# repo the trigger watches was renamed to haruspex separately; Cloud Build
+# matches push events by repo name, so that pair has to disagree or the trigger
+# never fires.
 forecasting_build = cloudbuild.Trigger(
     "forecasting-build",
     filename="cloudbuild.yaml",
@@ -911,7 +855,7 @@ pubsub_config = {
             "footstrike-events-staging": fitness_api_staging_sa,
             "identity-events-staging": identity_staging_sa,
             "asset-events-staging": asset_manager_staging_sa,
-            "haruspex-events-staging": forecasting_staging_sa,
+            "haruspex-events-staging": haruspex_staging_sa,
         },
         "subscriber_sa": comms_staging_sa,
         "subscriptions": {
@@ -926,7 +870,7 @@ pubsub_config = {
             "footstrike-events-prod": fitness_api_prod_sa,
             "identity-events-prod": identity_prod_sa,
             "asset-events-prod": asset_manager_prod_sa,
-            "haruspex-events-prod": forecasting_prod_sa,
+            "haruspex-events-prod": haruspex_prod_sa,
         },
         "subscriber_sa": comms_prod_sa,
         "subscriptions": {
@@ -976,15 +920,24 @@ for env, env_config in pubsub_config.items():
             member=subscriber_sa.email.apply(lambda email: f"serviceAccount:{email}"),
         )
 
-# Rename phase 1: let the new service accounts publish to the event topics the
-# old ones already publish to. The topics were renamed to haruspex-events-* back
-# in #53 and are NOT recreated here -- only a second publisher is added to each.
-# pubsub_config maps a topic to exactly one publisher SA, and the loop above
-# builds a TopicIAMMember from it. TopicIAMMember is additive rather than
-# authoritative, so granting a second member here coexists with the one the loop
-# created instead of displacing it; that is what lets both namespaces publish
-# during the cutover window. The forecasting-* grants come out with the rest of
-# the old resources in the teardown phase.
+# These duplicate the publisher grants the pubsub_config loop above now builds:
+# both resources assert (haruspex-*-sa, roles/pubsub.publisher) on the same
+# topic. They are kept deliberately, and removing them is not a tidy-up.
+#
+# GCP holds ONE binding per (member, role). Two Pulumi resources asserting it
+# means deleting either issues a real removeIamMember and the binding goes,
+# whatever the surviving resource's state says it owns -- and Pulumi will not
+# re-assert on the next up, because its state already records the member as
+# present. During the teardown this mattered: the loop-built grants were being
+# replaced (forecasting-sa -> haruspex-sa) in the same apply that would have
+# deleted these, with no ordering guarantee between the two, so prod could have
+# been left unable to publish.
+#
+# To remove them later, delete them and then run `pulumi up --refresh` in the
+# same sitting: the refresh notices the loop-built grant's binding is missing
+# and re-creates it. Verify with
+#   gcloud pubsub topics get-iam-policy haruspex-events-prod
+# before considering it done.
 for _env_suffix, _sa in (("staging", haruspex_staging_sa), ("prod", haruspex_prod_sa)):
     pubsub.TopicIAMMember(
         f"haruspex-events-{_env_suffix}-publisher-haruspex-sa",
