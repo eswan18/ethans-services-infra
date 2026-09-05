@@ -55,22 +55,50 @@ Recreate under **Networks → Tunnels → your tunnel → Public Hostname**.
 
 Plus a catch-all rule returning `http_status:404` for anything unmatched.
 
-**`forecasting.ethanswan.com` is no longer in this table, and that is correct.**
-The service moved to the `haruspex.fyi` apex in Sept 2026 and the old hostname
-kept a duplicate tunnel route for a while, on the theory that removing it would
-take the DNS record with it. The route was removed during the Sept 2026 rename
-and the redirect kept working: a Redirect Rule in the `ethanswan.com` zone 301s
-the old host (path-preserving) to the new domain, and Redirect Rules run at the
-edge *before* origin selection, so the request never reaches the tunnel at all.
+**`forecasting.ethanswan.com` is missing from this table and that is a BUG, not
+a tidy state.** The service moved to the `haruspex.fyi` apex in Sept 2026 and the
+old hostname was kept only so its DNS record would survive, because a Redirect
+Rule in the `ethanswan.com` zone 301s it (path-preserving) to the new domain.
+Redirect Rules run at the edge *before* origin selection, so the request never
+reaches the tunnel and the route behind it is inert — which is exactly what
+makes deleting it look safe.
 
-What the old hostname does still need is its **DNS record** — a name that does
-not resolve cannot be redirected. That record has no tunnel route behind it and
-should not get one; do not "fix" its absence from this table by recreating it.
+It is not safe. Deleting the public hostname deletes the DNS record with it, and
+a name that does not resolve cannot be redirected. During the Sept 2026 rename
+the hostname was removed; the host kept answering long enough for someone to
+check it and conclude the removal was harmless, and only later began returning
+NXDOMAIN.
+
+The Redirect Rule is not what breaks, and checking it will mislead you. It stays
+configured and it still works -- resolve the name manually and the edge answers
+correctly:
+
+```
+$ curl -sI --resolve forecasting.ethanswan.com:443:104.21.41.131 \
+    https://forecasting.ethanswan.com/competitions/3?x=1
+HTTP/2 301
+location: https://haruspex.fyi/competitions/3?x=1
+```
+
+What is missing is only the DNS record: with nothing to resolve, the browser
+never reaches the edge, so the rule never runs. Restore it either way --
+
+- **Re-add the public hostname** in the tunnel. Any in-cluster Service works as
+  the target; the route is never used. Simplest, but it leaves an inert route
+  that invites exactly this deletion again.
+- **Create the DNS record directly**, proxied (orange-cloud), pointing anywhere
+  that never gets used -- `192.0.2.1` (TEST-NET-1) is the conventional choice.
+  The Redirect Rule answers at the edge before origin selection, so the address
+  is never dialled. This is the better shape: it says plainly that the hostname
+  exists only to be redirected.
+
+**Do not verify this one by curling it right after the change. The failure is
+delayed.**
 
 Two cosmetic notes: the `ethanswan.com` and `haruspex.fyi` entries omit the
 explicit `:80` that the `footstrike.run` entries carry — functionally identical,
 since the Services listen on 80 and `http://` defaults there. And no entry sets
-`originRequest` overrides, so all seven use Cloudflare's defaults.
+`originRequest` overrides, so all six use Cloudflare's defaults.
 
 ## DNS
 
