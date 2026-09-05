@@ -305,6 +305,24 @@ forecasting_prod_sa = serviceaccount.Account(
     display_name="Forecasting Prod Service Account",
     project=project,
 )
+# Phase 1 of the forecasting -> haruspex rename. Service accounts, secrets and
+# namespaces cannot be renamed in place, so the new identity is built alongside
+# the old one and both run until the Cloudflare cutover. Everything added for
+# the rename is additive: nothing here removes or mutates a forecasting-*
+# resource, so this apply cannot take the live service down. The forecasting-*
+# resources are deleted in a later phase, after the cutover is verified.
+haruspex_staging_sa = serviceaccount.Account(
+    "haruspex-staging-sa",
+    account_id="haruspex-staging-sa",
+    display_name="Haruspex Staging Service Account",
+    project=project,
+)
+haruspex_prod_sa = serviceaccount.Account(
+    "haruspex-prod-sa",
+    account_id="haruspex-prod-sa",
+    display_name="Haruspex Prod Service Account",
+    project=project,
+)
 comms_staging_sa = serviceaccount.Account(
     "comms-staging-sa",
     account_id="comms-staging-sa",
@@ -386,6 +404,22 @@ forecasting_staging_wi = serviceaccount.IAMMember(
     service_account_id=forecasting_staging_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[forecasting-staging/forecasting-staging-ksa]",
+)
+# The haruspex-* namespaces and KSAs do not exist yet -- they arrive with the
+# manifests in the next phase. Binding ahead of them is fine: workload identity
+# members are plain strings to IAM, not references, so this neither fails nor
+# grants anything until a pod actually runs under that KSA.
+haruspex_prod_wi = serviceaccount.IAMMember(
+    "haruspex-prod-workload-identity",
+    service_account_id=haruspex_prod_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[haruspex-prod/haruspex-prod-ksa]",
+)
+haruspex_staging_wi = serviceaccount.IAMMember(
+    "haruspex-staging-workload-identity",
+    service_account_id=haruspex_staging_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[haruspex-staging/haruspex-staging-ksa]",
 )
 comms_prod_wi = serviceaccount.IAMMember(
     "comms-prod-workload-identity",
@@ -518,6 +552,26 @@ secret_access = {
             "forecasting_staging_idp_client_secret",
         ],
     ),
+    "haruspex-prod": (
+        haruspex_prod_sa,
+        [
+            "haruspex_prod_database_url",
+            "haruspex_prod_jwt_secret",
+            "haruspex_prod_argon2_salt",
+            "haruspex_prod_idp_client_id",
+            "haruspex_prod_idp_client_secret",
+        ],
+    ),
+    "haruspex-staging": (
+        haruspex_staging_sa,
+        [
+            "haruspex_staging_database_url",
+            "haruspex_staging_jwt_secret",
+            "haruspex_staging_argon2_salt",
+            "haruspex_staging_idp_client_id",
+            "haruspex_staging_idp_client_secret",
+        ],
+    ),
     "comms-prod": (
         comms_prod_sa,
         [
@@ -645,6 +699,18 @@ secret_names = [
     "forecasting_staging_argon2_salt",
     "forecasting_staging_idp_client_id",
     "forecasting_staging_idp_client_secret",
+    # haruspex prod (rename phase 1; values copied from forecasting_prod_*)
+    "haruspex_prod_database_url",
+    "haruspex_prod_jwt_secret",
+    "haruspex_prod_argon2_salt",
+    "haruspex_prod_idp_client_id",
+    "haruspex_prod_idp_client_secret",
+    # haruspex staging (rename phase 1; values copied from forecasting_staging_*)
+    "haruspex_staging_database_url",
+    "haruspex_staging_jwt_secret",
+    "haruspex_staging_argon2_salt",
+    "haruspex_staging_idp_client_id",
+    "haruspex_staging_idp_client_secret",
     # forecasting build (used by Cloud Build, not the app)
     "forecasting_sentry_auth_token",
     # comms prod
@@ -909,6 +975,24 @@ for env, env_config in pubsub_config.items():
             role="roles/pubsub.subscriber",
             member=subscriber_sa.email.apply(lambda email: f"serviceAccount:{email}"),
         )
+
+# Rename phase 1: let the new service accounts publish to the event topics the
+# old ones already publish to. The topics were renamed to haruspex-events-* back
+# in #53 and are NOT recreated here -- only a second publisher is added to each.
+# pubsub_config maps a topic to exactly one publisher SA, and the loop above
+# builds a TopicIAMMember from it. TopicIAMMember is additive rather than
+# authoritative, so granting a second member here coexists with the one the loop
+# created instead of displacing it; that is what lets both namespaces publish
+# during the cutover window. The forecasting-* grants come out with the rest of
+# the old resources in the teardown phase.
+for _env_suffix, _sa in (("staging", haruspex_staging_sa), ("prod", haruspex_prod_sa)):
+    pubsub.TopicIAMMember(
+        f"haruspex-events-{_env_suffix}-publisher-haruspex-sa",
+        project=project,
+        topic=pubsub_topics[f"haruspex-events-{_env_suffix}"].name,
+        role="roles/pubsub.publisher",
+        member=_sa.email.apply(lambda email: f"serviceAccount:{email}"),
+    )
 
 # Namespaces for the Helm releases that do not create their own. cert-manager
 # and ingress-nginx pass create_namespace=True; argocd, argocd-image-updater
