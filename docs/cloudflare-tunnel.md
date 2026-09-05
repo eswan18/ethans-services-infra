@@ -50,20 +50,22 @@ Recreate under **Networks → Tunnels → your tunnel → Public Hostname**.
 | `api.footstrike.run` | `http://footstrike-api.footstrike-api-prod.svc.cluster.local:80` |
 | `identity.ethanswan.com` | `http://identity.identity-prod.svc.cluster.local` |
 | `assets.ethanswan.com` | `http://asset-manager.asset-manager-prod.svc.cluster.local` |
-| `haruspex.fyi` | `http://forecasting.forecasting-prod.svc.cluster.local` |
-| `forecasting.ethanswan.com` | `http://forecasting.forecasting-prod.svc.cluster.local` |
+| `haruspex.fyi` | `http://haruspex.haruspex-prod.svc.cluster.local` |
 | `bifrost.ethanswan.com` | `http://bifrost.bifrost-prod.svc.cluster.local` |
 
 Plus a catch-all rule returning `http_status:404` for anything unmatched.
 
-**`forecasting.ethanswan.com` and `haruspex.fyi` deliberately point at the same
-Service.** Forecasting moved to the `haruspex.fyi` apex in Sept 2026; the old
-hostname is kept only so its DNS record survives, because a Redirect Rule in the
-`ethanswan.com` zone 301s it (path-preserving) to the new domain. Redirect Rules
-run at the edge *before* origin selection, so requests to the old host never
-reach the tunnel and the duplicate route is inert. Deleting the hostname here
-would take the DNS record with it, and a name that does not resolve cannot be
-redirected — so leave it.
+**`forecasting.ethanswan.com` is no longer in this table, and that is correct.**
+The service moved to the `haruspex.fyi` apex in Sept 2026 and the old hostname
+kept a duplicate tunnel route for a while, on the theory that removing it would
+take the DNS record with it. The route was removed during the Sept 2026 rename
+and the redirect kept working: a Redirect Rule in the `ethanswan.com` zone 301s
+the old host (path-preserving) to the new domain, and Redirect Rules run at the
+edge *before* origin selection, so the request never reaches the tunnel at all.
+
+What the old hostname does still need is its **DNS record** — a name that does
+not resolve cannot be redirected. That record has no tunnel route behind it and
+should not get one; do not "fix" its absence from this table by recreating it.
 
 Two cosmetic notes: the `ethanswan.com` and `haruspex.fyi` entries omit the
 explicit `:80` that the `footstrike.run` entries carry — functionally identical,

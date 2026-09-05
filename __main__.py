@@ -762,15 +762,11 @@ asset_manager_build = cloudbuild.Trigger(
     project=project,
     service_account=cloud_build_sa,
 )
-# Trigger name stays "forecasting" because bifrost's registry key does -- it is
-# what Orchestrator.TriggerIDs looks up. The namespaces and ArgoCD apps that
-# also used to justify this are haruspex now, so bifrost is the only reason
-# left, and renaming these triggers is part of that same change. The GitHub
-# repo the trigger watches was renamed to haruspex separately; Cloud Build
-# matches push events by repo name, so that pair has to disagree or the trigger
-# never fires.
-forecasting_build = cloudbuild.Trigger(
-    "forecasting-build",
+# Renamed from forecasting-build alongside bifrost's registry key, which is
+# what Orchestrator.TriggerIDs matches trigger names against. The two have to
+# move together or preview environments look up a trigger that does not exist.
+haruspex_build = cloudbuild.Trigger(
+    "haruspex-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="haruspex",
@@ -779,7 +775,7 @@ forecasting_build = cloudbuild.Trigger(
             branch="^main$",
         ),
     ),
-    name="forecasting-build",
+    name="haruspex-build",
     project=project,
     service_account=cloud_build_sa,
 )
@@ -823,11 +819,13 @@ bifrost_build = cloudbuild.Trigger(
 # *repo* the trigger builds from is that service's own repo — the two aren't
 # always equal (asset-manager's repo is asset_manager), so each is sourced
 # from its own element of the pair rather than one variable serving both.
+# haruspex's pair was unequal too until Sept 2026, when the registry key caught
+# up with the repo rename; keeping both elements is what let them differ then.
 for preview_key, preview_repo in [
     ("footstrike-api", "footstrike-api"),
     ("footstrike-dashboard", "footstrike-dashboard"),
     ("identity", "identity"),
-    ("forecasting", "haruspex"),
+    ("haruspex", "haruspex"),
 ]:
     cloudbuild.Trigger(
         f"{preview_key}-preview-build",
@@ -1437,7 +1435,7 @@ prod_health_checks = {
     "footstrike-dashboard": ("footstrike.run", "/health"),
     "footstrike-api": ("api.footstrike.run", "/health"),
     "identity": ("identity.ethanswan.com", "/health"),
-    "forecasting": ("haruspex.fyi", "/api/health"),
+    "haruspex": ("haruspex.fyi", "/api/health"),
     "asset-manager": ("assets.ethanswan.com", "/health"),
     "bifrost": ("bifrost.ethanswan.com", "/health"),
 }
