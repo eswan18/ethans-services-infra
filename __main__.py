@@ -1586,11 +1586,6 @@ monitoring.AlertPolicy(
 # derived from these files. (footstrike-api/docs/DATA-PRIVACY.md is the
 # reference for what is stored and when it is deleted.)
 #
-# Both buckets predate this code: they were created by hand and are adopted
-# here with import_, which also means their real settings are read back and
-# must match what is declared below — a mismatch fails the preview instead of
-# changing anything.
-#
 # Guard rails, because replacing or deleting a bucket destroys the archive:
 #   - protect:          `pulumi up` refuses any plan that would delete one.
 #   - retain_on_delete: even `pulumi destroy`, or removing the resource from
@@ -1598,15 +1593,23 @@ monitoring.AlertPolicy(
 #   - ignore_changes on location: Cloudflare honours location only when a
 #                       bucket is first created, so a diff there could never be
 #                       applied in place.
-# Jurisdiction cannot be changed on an existing bucket either. Moving to an EU
-# jurisdiction means a new bucket and a copy, not an edit here.
+#
+# A bucket can be neither renamed nor moved to another jurisdiction. Either is
+# a new bucket, a copy of every object, and a cutover — which is how these came
+# to exist: until October 2026 the archive lived in fitness-hae-raw-{env}
+# (named for the pre-rename service and for Health Auto Export, a source since
+# retired), and was copied here. Naming, for whoever adds the next one:
+# footstrike-raw-{env} is the default jurisdiction; if data ever has to live in
+# a particular place, that is a new bucket with the place appended —
+# footstrike-raw-{env}-eu — never a change to one of these.
 #
 # Still by hand, deliberately:
 #   - The R2 access keys (footstrike_api_{env}_r2_access_key_id / _secret in
-#     Secret Manager). Mint each one scoped to its own bucket with object
-#     read/write only.
-#   - Lifecycle rules and custom domains. There should be none; a lifecycle
-#     rule that expires objects would silently delete the archive.
+#     Secret Manager). Each is scoped to its own bucket with object read/write
+#     only.
+#   - Lifecycle rules and custom domains. There should be none beyond
+#     Cloudflare's default multipart-upload cleanup; a lifecycle rule that
+#     expires objects would silently delete the archive.
 #
 # cloudflare-r2-api-token is its own token — Account > Workers R2 Storage >
 # Edit — separate from the zone-scoped DNS tokens above, which cannot see R2.
@@ -1616,49 +1619,19 @@ cloudflare_r2_provider = cloudflare.Provider(
     api_token=config.require_secret("cloudflare-r2-api-token"),
 )
 
-# Two generations of bucket exist while the archive is being moved (Oct 2026):
-#
-#   fitness-hae-raw-{env}  the originals, adopted by import. Named for the
-#                          pre-rename service and for Health Auto Export, a
-#                          source that no longer exists. Being retired.
-#   footstrike-raw-{env}   their replacements, created here. A bucket cannot be
-#                          renamed, so the "rename" is: create these, copy every
-#                          object across (fitapi-copy-raw-archive in
-#                          footstrike-api), point the API at them, and only then
-#                          retire the originals.
-#
-# Naming, for whoever adds the next one: footstrike-raw-{env} is the default
-# jurisdiction. If data ever has to live in a particular place, that is a new
-# bucket with the place appended — footstrike-raw-{env}-eu — never a change to
-# one of these.
-#
-# To retire the originals once the API has run on the new buckets for a while
-# and the object counts have been compared: delete the first tuple below and
-# `pulumi up` (retain_on_delete means Pulumi forgets them and deletes nothing;
-# `pulumi state unprotect` first), then empty and delete the buckets by hand in
-# the Cloudflare dashboard.
-r2_buckets = [
-    # (bucket name, adopt an existing bucket?)
-    *((f"fitness-hae-raw-{env}", True) for env in ("prod", "staging")),
-    *((f"footstrike-raw-{env}", False) for env in ("prod", "staging")),
-]
-for r2_bucket_name, r2_adopt in r2_buckets:
+for r2_env in ("prod", "staging"):
+    r2_bucket_name = f"footstrike-raw-{r2_env}"
     r2_bucket = cloudflare.R2Bucket(
         r2_bucket_name,
         account_id=cloudflare_account_id,
         name=r2_bucket_name,
         jurisdiction="default",
-        # Eastern North America, like the originals and near the cluster
-        # (us-central1). Only read when a bucket is created; see ignore_changes.
-        location=None if r2_adopt else "enam",
+        # Eastern North America, near the cluster (us-central1). Only read
+        # when a bucket is created; see ignore_changes.
+        location="enam",
         storage_class="Standard",
         opts=pulumi.ResourceOptions(
             provider=cloudflare_r2_provider,
-            import_=(
-                f"{cloudflare_account_id}/{r2_bucket_name}/default"
-                if r2_adopt
-                else None
-            ),
             protect=True,
             retain_on_delete=True,
             ignore_changes=["location"],
@@ -1666,18 +1639,11 @@ for r2_bucket_name, r2_adopt in r2_buckets:
     )
     # The bucket's public r2.dev URL, pinned OFF: with it on, anyone holding
     # the URL can read every object without credentials. footstrike-api only
-    # ever uses the authenticated S3 endpoint, so nothing depends on it. This
-    # resource cannot be imported, so the first `pulumi up` sets it — closing
-    # the URL if it happened to be open. It does not cover a custom domain
-    # attached to the bucket, which is a separate way of exposing one.
+    # ever uses the authenticated S3 endpoint, so nothing depends on it. It
+    # does not cover a custom domain attached to the bucket, which is a
+    # separate way of exposing one.
     cloudflare.R2ManagedDomain(
-        # Named for what it does. The two original buckets keep the older,
-        # misleading "-public-url" name (it reads as if a URL were being
-        # created): renaming a live resource needs an alias, and those two go
-        # away when the originals are retired.
-        f"{r2_bucket_name}-public-url"
-        if r2_adopt
-        else f"{r2_bucket_name}-public-access-off",
+        f"{r2_bucket_name}-public-access-off",
         account_id=cloudflare_account_id,
         bucket_name=r2_bucket.name,
         jurisdiction="default",
