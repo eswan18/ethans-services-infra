@@ -44,6 +44,14 @@ Infrastructure as code for Ethan's services, using Pulumi with Python on GCP.
   the dashboard.
 
 
+- **Cloudflare R2 buckets** — `fitness-hae-raw-prod` and
+  `fitness-hae-raw-staging`, footstrike-api's raw workout archive (heart-rate
+  samples and GPS routes; the only copy). Both are `protect`ed and
+  `retain_on_delete`, and each has its public `r2.dev` URL pinned off. Needs
+  the `cloudflare-r2-api-token` stack secret (Account > Workers R2 Storage >
+  Edit). The R2 **access keys**, lifecycle rules and custom domains are still
+  managed by hand in the Cloudflare dashboard.
+
 - **Monitoring** — uptime checks against each prod health endpoint, the email
   notification channel, and both alert policies (`Pod Crash Loop`,
   `Prod Uptime Check Failure`).

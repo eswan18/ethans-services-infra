@@ -12,3 +12,5 @@ config:
     secure: AAABAHbD/o65Dwyyq6pwJlAXtF5iAO1OqGQ+NCDLo3NRVacQPwCMzrD5kp0ja1uDLzC4pQqooucgdmLskejnVTEJ8f2ores9qTwgaQzBZ2kqmoMy4IQRCDdw473TgqlSWb/gOYOmYMpps1g0E4SB+eQ5me4TVJjCs/HVSDI=
   ethans-services-infra:cloudflare-dns-api-token-haruspex:
     secure: AAABADi1iZlbuUAlVQxxO+OgPTocW6QhwiLesfvJ3Rbbes9tvgxL5J/WkPfvItThdyKFdoYD9H+H3WPlDqlKhjsEgk6MiZaps/woM1zN+cp5ahMPPw==
+  ethans-services-infra:cloudflare-r2-api-token:
+    secure: AAABAEwOLqoLkAWcdkUAbln9UBdkGkrU0nrm71rgjiReXWSVaP8AqB1j5b7dtH8S8fCAhM9GyXaMee3BOZdaMFhN3Blsbbw24fwsWUtxjcKjGmIj/g==
