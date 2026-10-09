@@ -1608,10 +1608,6 @@ monitoring.AlertPolicy(
 #   - Lifecycle rules and custom domains. There should be none; a lifecycle
 #     rule that expires objects would silently delete the archive.
 #
-# The names say "fitness" and "hae" for history's sake (the pre-rename service,
-# and Health Auto Export, the first thing that wrote here). Renaming a bucket
-# is also a new bucket and a copy.
-#
 # cloudflare-r2-api-token is its own token — Account > Workers R2 Storage >
 # Edit — separate from the zone-scoped DNS tokens above, which cannot see R2.
 cloudflare_account_id = "8f74e735ece73e939bbe9e4c7e791e4a"
@@ -1620,17 +1616,49 @@ cloudflare_r2_provider = cloudflare.Provider(
     api_token=config.require_secret("cloudflare-r2-api-token"),
 )
 
-for r2_env in ("prod", "staging"):
-    r2_bucket_name = f"fitness-hae-raw-{r2_env}"
+# Two generations of bucket exist while the archive is being moved (Oct 2026):
+#
+#   fitness-hae-raw-{env}  the originals, adopted by import. Named for the
+#                          pre-rename service and for Health Auto Export, a
+#                          source that no longer exists. Being retired.
+#   footstrike-raw-{env}   their replacements, created here. A bucket cannot be
+#                          renamed, so the "rename" is: create these, copy every
+#                          object across (fitapi-copy-raw-archive in
+#                          footstrike-api), point the API at them, and only then
+#                          retire the originals.
+#
+# Naming, for whoever adds the next one: footstrike-raw-{env} is the default
+# jurisdiction. If data ever has to live in a particular place, that is a new
+# bucket with the place appended — footstrike-raw-{env}-eu — never a change to
+# one of these.
+#
+# To retire the originals once the API has run on the new buckets for a while
+# and the object counts have been compared: delete the first tuple below and
+# `pulumi up` (retain_on_delete means Pulumi forgets them and deletes nothing;
+# `pulumi state unprotect` first), then empty and delete the buckets by hand in
+# the Cloudflare dashboard.
+r2_buckets = [
+    # (bucket name, adopt an existing bucket?)
+    *((f"fitness-hae-raw-{env}", True) for env in ("prod", "staging")),
+    *((f"footstrike-raw-{env}", False) for env in ("prod", "staging")),
+]
+for r2_bucket_name, r2_adopt in r2_buckets:
     r2_bucket = cloudflare.R2Bucket(
         r2_bucket_name,
         account_id=cloudflare_account_id,
         name=r2_bucket_name,
         jurisdiction="default",
+        # Eastern North America, like the originals and near the cluster
+        # (us-central1). Only read when a bucket is created; see ignore_changes.
+        location=None if r2_adopt else "enam",
         storage_class="Standard",
         opts=pulumi.ResourceOptions(
             provider=cloudflare_r2_provider,
-            import_=f"{cloudflare_account_id}/{r2_bucket_name}/default",
+            import_=(
+                f"{cloudflare_account_id}/{r2_bucket_name}/default"
+                if r2_adopt
+                else None
+            ),
             protect=True,
             retain_on_delete=True,
             ignore_changes=["location"],

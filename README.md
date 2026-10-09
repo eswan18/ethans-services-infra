@@ -44,9 +44,11 @@ Infrastructure as code for Ethan's services, using Pulumi with Python on GCP.
   the dashboard.
 
 
-- **Cloudflare R2 buckets** — `fitness-hae-raw-prod` and
-  `fitness-hae-raw-staging`, footstrike-api's raw workout archive (heart-rate
-  samples and GPS routes; the only copy). Both are `protect`ed and
+- **Cloudflare R2 buckets** — footstrike-api's raw workout archive (heart-rate
+  samples and GPS routes; the only copy): `footstrike-raw-prod` and
+  `footstrike-raw-staging`, plus the buckets they replace,
+  `fitness-hae-raw-prod` and `fitness-hae-raw-staging`, until the move is
+  finished (see the comment in `__main__.py`). All are `protect`ed and
   `retain_on_delete`, and each has its public `r2.dev` URL pinned off. Needs
   the `cloudflare-r2-api-token` stack secret (Account > Workers R2 Storage >
   Edit). The R2 **access keys**, lifecycle rules and custom domains are still
