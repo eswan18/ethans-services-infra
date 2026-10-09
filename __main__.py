@@ -1671,7 +1671,13 @@ for r2_bucket_name, r2_adopt in r2_buckets:
     # the URL if it happened to be open. It does not cover a custom domain
     # attached to the bucket, which is a separate way of exposing one.
     cloudflare.R2ManagedDomain(
-        f"{r2_bucket_name}-public-url",
+        # Named for what it does. The two original buckets keep the older,
+        # misleading "-public-url" name (it reads as if a URL were being
+        # created): renaming a live resource needs an alias, and those two go
+        # away when the originals are retired.
+        f"{r2_bucket_name}-public-url"
+        if r2_adopt
+        else f"{r2_bucket_name}-public-access-off",
         account_id=cloudflare_account_id,
         bucket_name=r2_bucket.name,
         jurisdiction="default",
