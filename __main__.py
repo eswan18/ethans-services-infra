@@ -14,6 +14,7 @@ from pulumi_gcp import (
     pubsub,
     monitoring,
 )
+import pulumi_cloudflare as cloudflare
 import pulumi_kubernetes as k8s
 
 # Configuration
@@ -1577,6 +1578,78 @@ monitoring.AlertPolicy(
         "subject": "GCP Pod Crash Loop",
     },
 )
+
+# Cloudflare R2: footstrike-api's raw workout archive, one bucket per
+# environment. These hold the most sensitive data in the fleet — per-sample
+# heart rate and GPS routes, including routes from users' homes — and they are
+# the ONLY copy of it: R2 has no backup, and Postgres holds only what is
+# derived from these files. (footstrike-api/docs/DATA-PRIVACY.md is the
+# reference for what is stored and when it is deleted.)
+#
+# Both buckets predate this code: they were created by hand and are adopted
+# here with import_, which also means their real settings are read back and
+# must match what is declared below — a mismatch fails the preview instead of
+# changing anything.
+#
+# Guard rails, because replacing or deleting a bucket destroys the archive:
+#   - protect:          `pulumi up` refuses any plan that would delete one.
+#   - retain_on_delete: even `pulumi destroy`, or removing the resource from
+#                       this file, leaves the real bucket alone.
+#   - ignore_changes on location: Cloudflare honours location only when a
+#                       bucket is first created, so a diff there could never be
+#                       applied in place.
+# Jurisdiction cannot be changed on an existing bucket either. Moving to an EU
+# jurisdiction means a new bucket and a copy, not an edit here.
+#
+# Still by hand, deliberately:
+#   - The R2 access keys (footstrike_api_{env}_r2_access_key_id / _secret in
+#     Secret Manager). Mint each one scoped to its own bucket with object
+#     read/write only.
+#   - Lifecycle rules and custom domains. There should be none; a lifecycle
+#     rule that expires objects would silently delete the archive.
+#
+# The names say "fitness" and "hae" for history's sake (the pre-rename service,
+# and Health Auto Export, the first thing that wrote here). Renaming a bucket
+# is also a new bucket and a copy.
+#
+# cloudflare-r2-api-token is its own token — Account > Workers R2 Storage >
+# Edit — separate from the zone-scoped DNS tokens above, which cannot see R2.
+cloudflare_account_id = "8f74e735ece73e939bbe9e4c7e791e4a"
+cloudflare_r2_provider = cloudflare.Provider(
+    "cloudflare-r2",
+    api_token=config.require_secret("cloudflare-r2-api-token"),
+)
+
+for r2_env in ("prod", "staging"):
+    r2_bucket_name = f"fitness-hae-raw-{r2_env}"
+    r2_bucket = cloudflare.R2Bucket(
+        r2_bucket_name,
+        account_id=cloudflare_account_id,
+        name=r2_bucket_name,
+        jurisdiction="default",
+        storage_class="Standard",
+        opts=pulumi.ResourceOptions(
+            provider=cloudflare_r2_provider,
+            import_=f"{cloudflare_account_id}/{r2_bucket_name}/default",
+            protect=True,
+            retain_on_delete=True,
+            ignore_changes=["location"],
+        ),
+    )
+    # The bucket's public r2.dev URL, pinned OFF: with it on, anyone holding
+    # the URL can read every object without credentials. footstrike-api only
+    # ever uses the authenticated S3 endpoint, so nothing depends on it. This
+    # resource cannot be imported, so the first `pulumi up` sets it — closing
+    # the URL if it happened to be open. It does not cover a custom domain
+    # attached to the bucket, which is a separate way of exposing one.
+    cloudflare.R2ManagedDomain(
+        f"{r2_bucket_name}-public-url",
+        account_id=cloudflare_account_id,
+        bucket_name=r2_bucket.name,
+        jurisdiction="default",
+        enabled=False,
+        opts=pulumi.ResourceOptions(provider=cloudflare_r2_provider),
+    )
 
 # Export cluster info
 pulumi.export("cluster_name", main_cluster.name)
