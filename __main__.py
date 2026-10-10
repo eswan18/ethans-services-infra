@@ -1350,7 +1350,7 @@ ingress_nginx_release = k8s.helm.v3.Release(
 )
 
 # cloudflared: the Cloudflare Tunnel connector carrying every prod public
-# hostname (*.ethanswan.com, footstrike.run, api.footstrike.run). It dials out
+# hostname (*.ethanswan.com, app.footstrike.run, api.footstrike.run). It dials out
 # to Cloudflare's edge, so there is no inbound LoadBalancer here to secure.
 #
 # Hand-applied and tracked nowhere until Aug 2026, which made it the quietest
@@ -1433,7 +1433,9 @@ cloudflared_deployment = k8s.apps.v1.Deployment(
 # outages the in-cluster restart alert can't see. US-only; the API requires a
 # minimum of 3 probe locations, so this is the smallest allowed footprint.
 prod_health_checks = {
-    "footstrike-dashboard": ("footstrike.run", "/health"),
+    # The dashboard is on the app subdomain; the footstrike.run apex is the
+    # static landing site on Cloudflare Pages, which has no /health.
+    "footstrike-dashboard": ("app.footstrike.run", "/health"),
     "footstrike-api": ("api.footstrike.run", "/health"),
     "identity": ("identity.ethanswan.com", "/health"),
     "haruspex": ("haruspex.fyi", "/api/health"),
