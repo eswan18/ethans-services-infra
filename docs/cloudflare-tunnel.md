@@ -46,7 +46,7 @@ Recreate under **Networks → Tunnels → your tunnel → Public Hostname**.
 
 | Public hostname | Service URL |
 |---|---|
-| `footstrike.run` | `http://footstrike-dashboard.footstrike-dashboard-prod.svc.cluster.local:80` |
+| `app.footstrike.run` | `http://footstrike-dashboard.footstrike-dashboard-prod.svc.cluster.local:80` |
 | `api.footstrike.run` | `http://footstrike-api.footstrike-api-prod.svc.cluster.local:80` |
 | `identity.ethanswan.com` | `http://identity.identity-prod.svc.cluster.local` |
 | `assets.ethanswan.com` | `http://asset-manager.asset-manager-prod.svc.cluster.local` |
@@ -54,6 +54,13 @@ Recreate under **Networks → Tunnels → your tunnel → Public Hostname**.
 | `bifrost.ethanswan.com` | `http://bifrost.bifrost-prod.svc.cluster.local` |
 
 Plus a catch-all rule returning `http_status:404` for anything unmatched.
+
+**The `footstrike.run` apex is deliberately not in this table.** Until October
+2026 it was the dashboard's hostname. It is now the public landing site
+(`footstrike-site`), served by Cloudflare Pages as a custom domain on that Pages
+project — it never touches the tunnel or the cluster. The dashboard moved to
+`app.footstrike.run`. Do not re-add the apex here: the tunnel route and the
+Pages custom domain both want the same DNS record.
 
 **`forecasting.ethanswan.com` is missing from this table and that is a BUG, not
 a tidy state.** The service moved to the `haruspex.fyi` apex in Sept 2026 and the
@@ -108,6 +115,9 @@ proxied, `dig` returns Cloudflare edge addresses (`104.21.x` / `172.67.x`)
 rather than the CNAME target — that is expected and not a misconfiguration.
 
 Zones: `footstrike.run`, `ethanswan.com` and `haruspex.fyi`.
+
+The `footstrike.run` apex record is the exception: it belongs to the Cloudflare
+Pages project for `footstrike-site`, not to this tunnel.
 
 `haruspex.fyi` also carries a **grey-cloud (DNS-only)** `staging` CNAME to
 `staging-ingress.tailc06f30.ts.net`, which has nothing to do with this tunnel —
