@@ -1434,7 +1434,7 @@ cloudflared_deployment = k8s.apps.v1.Deployment(
 # minimum of 3 probe locations, so this is the smallest allowed footprint.
 prod_health_checks = {
     # The dashboard is on the app subdomain; the footstrike.run apex is the
-    # static landing site on Cloudflare Pages, which has no /health.
+    # static landing site served by a Cloudflare Worker, which has no /health.
     "footstrike-dashboard": ("app.footstrike.run", "/health"),
     "footstrike-api": ("api.footstrike.run", "/health"),
     "identity": ("identity.ethanswan.com", "/health"),
