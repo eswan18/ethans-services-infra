@@ -57,10 +57,12 @@ Plus a catch-all rule returning `http_status:404` for anything unmatched.
 
 **The `footstrike.run` apex is deliberately not in this table.** Until October
 2026 it was the dashboard's hostname. It is now the public landing site
-(`footstrike-site`), served by Cloudflare Pages as a custom domain on that Pages
-project — it never touches the tunnel or the cluster. The dashboard moved to
-`app.footstrike.run`. Do not re-add the apex here: the tunnel route and the
-Pages custom domain both want the same DNS record.
+(`footstrike-site`), served by a Cloudflare Worker with static assets (under
+**Workers & Pages** in the dashboard; it is a Worker, not a classic Pages
+project) that has `footstrike.run` as its custom domain — it never touches the
+tunnel or the cluster. The dashboard moved to `app.footstrike.run`. Do not
+re-add the apex here: the tunnel route and the Worker's custom domain both want
+the same DNS record.
 
 **`forecasting.ethanswan.com` is missing from this table and that is a BUG, not
 a tidy state.** The service moved to the `haruspex.fyi` apex in Sept 2026 and the
@@ -116,8 +118,13 @@ rather than the CNAME target — that is expected and not a misconfiguration.
 
 Zones: `footstrike.run`, `ethanswan.com` and `haruspex.fyi`.
 
-The `footstrike.run` apex record is the exception: it belongs to the Cloudflare
-Pages project for `footstrike-site`, not to this tunnel.
+The `footstrike.run` apex record is the exception: it belongs to the
+`footstrike-site` Worker's custom domain, not to this tunnel.
+
+`www.footstrike.run` is a proxied record that exists only to be redirected: a
+Redirect Rule in the zone 301s it (path and query preserved) to the apex. Like
+`forecasting.ethanswan.com` above, the address it points at is never dialled,
+and deleting the record breaks the redirect.
 
 `haruspex.fyi` also carries a **grey-cloud (DNS-only)** `staging` CNAME to
 `staging-ingress.tailc06f30.ts.net`, which has nothing to do with this tunnel —
