@@ -4,18 +4,18 @@ import base64
 import json
 
 import pulumi
-from pulumi_gcp import (
-    container,
-    serviceaccount,
-    projects,
-    artifactregistry,
-    secretmanager,
-    cloudbuild,
-    pubsub,
-    monitoring,
-)
 import pulumi_cloudflare as cloudflare
 import pulumi_kubernetes as k8s
+from pulumi_gcp import (
+    artifactregistry,
+    cloudbuild,
+    container,
+    monitoring,
+    projects,
+    pubsub,
+    secretmanager,
+    serviceaccount,
+)
 
 # Configuration
 config = pulumi.Config()
@@ -882,7 +882,7 @@ pubsub_config = {
 }
 
 pubsub_topics = {}
-for env, env_config in pubsub_config.items():
+for env_config in pubsub_config.values():
     for topic_name, publisher_sa in env_config["topics"].items():
         topic = pubsub.Topic(
             topic_name,

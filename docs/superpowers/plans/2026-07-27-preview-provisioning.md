@@ -69,9 +69,9 @@ preview_wildcard_cert = k8s.apiextensions.CustomResource(
 Append to the `secret_names` list (in the bifrost section):
 
 ```python
-    "bifrost_prod_github_token",
-    "bifrost_prod_neon_api_key",
-    "bifrost_prod_preview_api_token",
+("bifrost_prod_github_token",)
+("bifrost_prod_neon_api_key",)
+("bifrost_prod_preview_api_token",)
 ```
 
 Extend the existing `"bifrost-prod"` entry's secret list in `secret_access` with the same three names.
