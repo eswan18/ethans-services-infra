@@ -1158,7 +1158,7 @@ csi_provider_gcp = k8s.yaml.v2.ConfigFile(
 tailscale_operator_release = k8s.helm.v3.Release(
     "tailscale-operator",
     chart="tailscale-operator",
-    version="1.94.1",
+    version="1.104.2",
     namespace="tailscale",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://pkgs.tailscale.com/helmcharts",
