@@ -1123,16 +1123,18 @@ github_repocreds_secret = k8s.core.v1.Secret(
 csi_secrets_store_release = k8s.helm.v3.Release(
     "csi-secrets-store",
     chart="secrets-store-csi-driver",
-    version="1.5.5",
+    version="1.6.1",
     namespace="kube-system",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts",
     ),
     values={
         "syncSecret": {"enabled": True},
-        # Re-fetch mounted secrets and patch synced K8s Secrets every poll
-        # interval (default 2m). Without this, SecretProviderClass changes
-        # never reach an already-created synced Secret.
+        # Re-fetch mounted secrets and patch synced K8s Secrets when kubelet
+        # republishes the volume (requiresRepublish, since 1.6), at most once
+        # per rotation-poll-interval (default 2m). Without this,
+        # SecretProviderClass changes never reach an already-created synced
+        # Secret.
         "enableSecretRotation": True,
     },
     opts=pulumi.ResourceOptions(provider=k8s_provider),
