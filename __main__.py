@@ -1197,7 +1197,7 @@ tailscale_operator_release = k8s.helm.v3.Release(
 cert_manager_release = k8s.helm.v3.Release(
     "cert-manager",
     chart="cert-manager",
-    version="v1.21.0",
+    version="v1.21.3",
     namespace="cert-manager",
     create_namespace=True,
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
