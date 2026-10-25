@@ -1023,7 +1023,7 @@ argocd_release = k8s.helm.v3.Release(
 argocd_image_updater_release = k8s.helm.v3.Release(
     "argocd-image-updater",
     chart="argocd-image-updater",
-    version="1.1.3",
+    version="1.3.2",
     namespace="argocd",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://argoproj.github.io/argo-helm",
@@ -1031,6 +1031,23 @@ argocd_image_updater_release = k8s.helm.v3.Release(
     values={
         "resources": {
             "requests": {"cpu": "5m", "memory": "32Mi"},
+        },
+        # How image-updater authenticates to Artifact Registry to list tags.
+        # Until Oct 2026 this lived only as a hand-added key on the live
+        # argocd-image-updater-config ConfigMap, surviving each Helm upgrade by
+        # 3-way merge; a rebuild would have dropped it and staging would have
+        # silently stopped auto-deploying. The pull secret is gar_pull_secret,
+        # below.
+        "config": {
+            "registries": [
+                {
+                    "name": "Google Artifact Registry",
+                    "prefix": "us-central1-docker.pkg.dev",
+                    "api_url": "https://us-central1-docker.pkg.dev",
+                    "credentials": "pullsecret:argocd/gar-pull-secret",
+                    "default": True,
+                },
+            ],
         },
     },
     opts=pulumi.ResourceOptions(
