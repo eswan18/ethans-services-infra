@@ -66,17 +66,25 @@ PREVIEW_TOKEN_SECRET = "bifrost_prod_preview_api_token"
 
 def preview_token() -> str:
     """Fetch the preview API bearer token from Secret Manager."""
-    return run([
-        "gcloud", "secrets", "versions", "access", "latest",
-        f"--secret={PREVIEW_TOKEN_SECRET}",
-    ])
+    return run(
+        [
+            "gcloud",
+            "secrets",
+            "versions",
+            "access",
+            "latest",
+            f"--secret={PREVIEW_TOKEN_SECRET}",
+        ]
+    )
 
 
 def preview_api(method: str, path: str, body: dict | None = None) -> dict:
     """Call bifrost's preview API. Exits with a clear message on failure."""
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
-        f"{BIFROST_URL}{path}", data=data, method=method,
+        f"{BIFROST_URL}{path}",
+        data=data,
+        method=method,
         headers={
             "Authorization": f"Bearer {preview_token()}",
             "Accept": "application/json",
@@ -94,9 +102,14 @@ def preview_api(method: str, path: str, body: dict | None = None) -> dict:
         except Exception:
             pass
         if e.code == 503:
-            print("Preview API unavailable — bifrost has no preview config.", file=sys.stderr)
+            print(
+                "Preview API unavailable — bifrost has no preview config.",
+                file=sys.stderr,
+            )
         elif e.code == 409:
-            print("That preview is busy — another up/down is in flight.", file=sys.stderr)
+            print(
+                "That preview is busy — another up/down is in flight.", file=sys.stderr
+            )
         elif e.code == 401:
             print("Unauthorized — check the preview API token.", file=sys.stderr)
         else:
@@ -122,7 +135,9 @@ def preview_list() -> None:
     print(f"{'TAG':<24} {'BRANCH':<24} {'PHASE':<10} {'HEALTH':<12} APPS")
     for p in previews:
         apps = ",".join(p.get("apps") or [])
-        print(f"{p['tag']:<24} {p['branch']:<24} {p['phase']:<10} {p['health']:<12} {apps}")
+        print(
+            f"{p['tag']:<24} {p['branch']:<24} {p['phase']:<10} {p['health']:<12} {apps}"
+        )
 
 
 def preview_up(branch: str, wait: bool = True) -> None:
@@ -145,7 +160,10 @@ def preview_up(branch: str, wait: bool = True) -> None:
                 print(f"  {app}: {url}")
             return
         if phase == "failed":
-            print(f"Preview {tag} failed: {rec.get('error', '(no detail)')}", file=sys.stderr)
+            print(
+                f"Preview {tag} failed: {rec.get('error', '(no detail)')}",
+                file=sys.stderr,
+            )
             sys.exit(1)
     print(f"Timed out waiting for {tag}; check `ib preview list`.", file=sys.stderr)
     sys.exit(1)
