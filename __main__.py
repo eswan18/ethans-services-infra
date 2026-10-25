@@ -975,7 +975,7 @@ tailscale_namespace = k8s.core.v1.Namespace(
 argocd_release = k8s.helm.v3.Release(
     "argocd",
     chart="argo-cd",
-    version="9.4.10",
+    version="10.11.1",
     namespace="argocd",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://argoproj.github.io/argo-helm",
@@ -1013,6 +1013,11 @@ argocd_release = k8s.helm.v3.Release(
         "dex": {"enabled": False},
         "notifications": {"enabled": False},
         "applicationSet": {"enabled": False},
+        # Chart 10.0 flipped this default to true. NetworkPolicies are a
+        # deliberate no here (personal cluster, 1-2 replicas), and the cluster
+        # does not enforce them today; pinning false keeps them from quietly
+        # becoming real if Dataplane V2 is ever turned on.
+        "global": {"networkPolicy": {"create": False}},
     },
     opts=pulumi.ResourceOptions(
         provider=k8s_provider,
