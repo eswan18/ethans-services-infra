@@ -282,22 +282,10 @@ fitness_api_prod_sa = serviceaccount.Account(
     display_name="Fitness API Prod",
     project=project,
 )
-asset_manager_staging_sa = serviceaccount.Account(
-    "asset-manager-staging-sa",
-    account_id="asset-manager-staging-sa",
-    display_name="Asset Manager Staging Service Account",
-    project=project,
-)
-asset_manager_prod_sa = serviceaccount.Account(
-    "asset-manager-prod-sa",
-    account_id="asset-manager-prod-sa",
-    display_name="Asset Manager Prod Service Account",
-    project=project,
-)
-# asset-manager is becoming sensibility (Oct 2026), the way forecasting became
-# haruspex: service accounts, secrets and namespaces have no rename, so the
-# sensibility identity is built alongside, traffic is cut over, and the
-# asset-manager-* resources above are then deleted.
+# This service was asset-manager until Oct 2026. Like forecasting -> haruspex,
+# the rename could not happen in place (service accounts, secrets and
+# namespaces have no rename), so the sensibility identity was built alongside,
+# traffic was cut over, and the asset-manager-* resources were deleted.
 sensibility_staging_sa = serviceaccount.Account(
     "sensibility-staging-sa",
     account_id="sensibility-staging-sa",
@@ -385,18 +373,6 @@ identity_staging_wi = serviceaccount.IAMMember(
     service_account_id=identity_staging_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[identity-staging/identity-staging-ksa]",
-)
-asset_manager_prod_wi = serviceaccount.IAMMember(
-    "asset-manager-prod-workload-identity",
-    service_account_id=asset_manager_prod_sa.name,
-    role="roles/iam.workloadIdentityUser",
-    member=f"serviceAccount:{project}.svc.id.goog[asset-manager-prod/asset-manager-prod-ksa]",
-)
-asset_manager_staging_wi = serviceaccount.IAMMember(
-    "asset-manager-staging-workload-identity",
-    service_account_id=asset_manager_staging_sa.name,
-    role="roles/iam.workloadIdentityUser",
-    member=f"serviceAccount:{project}.svc.id.goog[asset-manager-staging/asset-manager-staging-ksa]",
 )
 sensibility_prod_wi = serviceaccount.IAMMember(
     "sensibility-prod-workload-identity",
@@ -513,24 +489,6 @@ secret_access = {
             "identity_staging_storage_access_key",
             "identity_staging_storage_secret_key",
             "identity_staging_storage_token",
-        ],
-    ),
-    "asset-manager-prod": (
-        asset_manager_prod_sa,
-        [
-            "asset_manager_prod_database_url",
-            "asset_manager_prod_client_id",
-            "asset_manager_prod_client_secret",
-            "asset_manager_prod_secret_key",
-        ],
-    ),
-    "asset-manager-staging": (
-        asset_manager_staging_sa,
-        [
-            "asset_manager_staging_database_url",
-            "asset_manager_staging_client_id",
-            "asset_manager_staging_client_secret",
-            "asset_manager_staging_secret_key",
         ],
     ),
     "sensibility-prod": (
@@ -676,22 +634,12 @@ secret_names = [
     "identity_staging_storage_access_key",
     "identity_staging_storage_secret_key",
     "identity_staging_storage_token",
-    # asset-manager prod
-    "asset_manager_prod_database_url",
-    "asset_manager_prod_client_id",
-    "asset_manager_prod_client_secret",
-    "asset_manager_prod_secret_key",
-    # asset-manager staging
-    "asset_manager_staging_database_url",
-    "asset_manager_staging_client_id",
-    "asset_manager_staging_client_secret",
-    "asset_manager_staging_secret_key",
-    # sensibility prod (values copied from asset_manager_prod_*)
+    # sensibility prod
     "sensibility_prod_database_url",
     "sensibility_prod_client_id",
     "sensibility_prod_client_secret",
     "sensibility_prod_secret_key",
-    # sensibility staging (values copied from asset_manager_staging_*)
+    # sensibility staging
     "sensibility_staging_database_url",
     "sensibility_staging_client_id",
     "sensibility_staging_client_secret",
@@ -736,9 +684,7 @@ for name in secret_names:
         replication=secretmanager.SecretReplicationArgs(
             auto=secretmanager.SecretReplicationAutoArgs(),
         ),
-        # asset_manager_* are unprotected so the sensibility rename can delete
-        # them (their values were copied to sensibility_*).
-        opts=pulumi.ResourceOptions(protect=not name.startswith("asset_manager_")),
+        opts=pulumi.ResourceOptions(protect=True),
     )
 
 # Per-secret IAM bindings (grant each SA access only to its own secrets)
@@ -914,7 +860,6 @@ pubsub_config = {
         "topics": {
             "footstrike-events-staging": fitness_api_staging_sa,
             "identity-events-staging": identity_staging_sa,
-            "asset-events-staging": asset_manager_staging_sa,
             "sensibility-events-staging": sensibility_staging_sa,
             "haruspex-events-staging": haruspex_staging_sa,
         },
@@ -922,7 +867,6 @@ pubsub_config = {
         "subscriptions": {
             "comms-staging-footstrike-sub": "footstrike-events-staging",
             "comms-staging-identity-sub": "identity-events-staging",
-            "comms-staging-asset-sub": "asset-events-staging",
             "comms-staging-sensibility-sub": "sensibility-events-staging",
             "comms-staging-haruspex-sub": "haruspex-events-staging",
         },
@@ -931,7 +875,6 @@ pubsub_config = {
         "topics": {
             "footstrike-events-prod": fitness_api_prod_sa,
             "identity-events-prod": identity_prod_sa,
-            "asset-events-prod": asset_manager_prod_sa,
             "sensibility-events-prod": sensibility_prod_sa,
             "haruspex-events-prod": haruspex_prod_sa,
         },
@@ -939,7 +882,6 @@ pubsub_config = {
         "subscriptions": {
             "comms-prod-footstrike-sub": "footstrike-events-prod",
             "comms-prod-identity-sub": "identity-events-prod",
-            "comms-prod-asset-sub": "asset-events-prod",
             "comms-prod-sensibility-sub": "sensibility-events-prod",
             "comms-prod-haruspex-sub": "haruspex-events-prod",
         },
@@ -1557,7 +1499,7 @@ prod_health_checks = {
     "footstrike-api": ("api.footstrike.run", "/health"),
     "identity": ("identity.ethanswan.com", "/health"),
     "haruspex": ("haruspex.fyi", "/api/health"),
-    "asset-manager": ("sensibility.money", "/health"),
+    "sensibility": ("sensibility.money", "/health"),
     "bifrost": ("bifrost.ethanswan.com", "/health"),
 }
 
