@@ -749,11 +749,13 @@ identity_build = cloudbuild.Trigger(
     project=project,
     service_account=cloud_build_sa,
 )
+# The GitHub repo was renamed asset_manager -> sensibility (Oct 2026); the
+# trigger, image and namespaces keep the old name.
 asset_manager_build = cloudbuild.Trigger(
     "asset-manager-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
-        name="asset_manager",
+        name="sensibility",
         owner=github_owner,
         push=cloudbuild.TriggerGithubPushArgs(
             branch="^main$",
