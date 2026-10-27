@@ -736,7 +736,9 @@ for name in secret_names:
         replication=secretmanager.SecretReplicationArgs(
             auto=secretmanager.SecretReplicationAutoArgs(),
         ),
-        opts=pulumi.ResourceOptions(protect=True),
+        # asset_manager_* are unprotected so the sensibility rename can delete
+        # them (their values were copied to sensibility_*).
+        opts=pulumi.ResourceOptions(protect=not name.startswith("asset_manager_")),
     )
 
 # Per-secret IAM bindings (grant each SA access only to its own secrets)
@@ -877,7 +879,7 @@ bifrost_build = cloudbuild.Trigger(
 # The trigger *name* must match bifrost's internal/registry/registry.yaml key
 # for the service (what Orchestrator.TriggerIDs looks up), while the GitHub
 # *repo* the trigger builds from is that service's own repo — the two aren't
-# always equal (asset-manager's repo is asset_manager), so each is sourced
+# always equal (asset-manager's repo was asset_manager), so each is sourced
 # from its own element of the pair rather than one variable serving both.
 # haruspex's pair was unequal too until Sept 2026, when the registry key caught
 # up with the repo rename; keeping both elements is what let them differ then.
@@ -913,6 +915,7 @@ pubsub_config = {
             "footstrike-events-staging": fitness_api_staging_sa,
             "identity-events-staging": identity_staging_sa,
             "asset-events-staging": asset_manager_staging_sa,
+            "sensibility-events-staging": sensibility_staging_sa,
             "haruspex-events-staging": haruspex_staging_sa,
         },
         "subscriber_sa": comms_staging_sa,
@@ -920,6 +923,7 @@ pubsub_config = {
             "comms-staging-footstrike-sub": "footstrike-events-staging",
             "comms-staging-identity-sub": "identity-events-staging",
             "comms-staging-asset-sub": "asset-events-staging",
+            "comms-staging-sensibility-sub": "sensibility-events-staging",
             "comms-staging-haruspex-sub": "haruspex-events-staging",
         },
     },
@@ -928,6 +932,7 @@ pubsub_config = {
             "footstrike-events-prod": fitness_api_prod_sa,
             "identity-events-prod": identity_prod_sa,
             "asset-events-prod": asset_manager_prod_sa,
+            "sensibility-events-prod": sensibility_prod_sa,
             "haruspex-events-prod": haruspex_prod_sa,
         },
         "subscriber_sa": comms_prod_sa,
@@ -935,6 +940,7 @@ pubsub_config = {
             "comms-prod-footstrike-sub": "footstrike-events-prod",
             "comms-prod-identity-sub": "identity-events-prod",
             "comms-prod-asset-sub": "asset-events-prod",
+            "comms-prod-sensibility-sub": "sensibility-events-prod",
             "comms-prod-haruspex-sub": "haruspex-events-prod",
         },
     },
