@@ -1205,7 +1205,8 @@ tailscale_operator_release = k8s.helm.v3.Release(
 )
 
 # cert-manager (Helm): browser-valid TLS for custom-domain staging hosts
-# (*.staging.footstrike.run, staging.haruspex.fyi) that stay tailnet-only.
+# (*.staging.footstrike.run, staging.haruspex.fyi, staging.sensibility.money)
+# that stay tailnet-only.
 # Issuance uses Let's Encrypt DNS-01 through the Cloudflare API, so it never
 # needs public reachability.
 #
@@ -1215,8 +1216,9 @@ tailscale_operator_release = k8s.helm.v3.Release(
 #
 #   cloudflare-dns-api-token           -> footstrike.run
 #   cloudflare-dns-api-token-haruspex  -> haruspex.fyi
+#   cloudflare-dns-api-token-sensibility -> sensibility.money
 #
-# Both need Zone:DNS:Edit *and* Zone:Zone:Read — cert-manager resolves a zone
+# All need Zone:DNS:Edit *and* Zone:Zone:Read — cert-manager resolves a zone
 # ID from the DNS name before it can write the _acme-challenge TXT record, and
 # Cloudflare's "Edit zone DNS" token template does not include the read.
 # Without it the challenge hangs rather than failing with a clear error.
@@ -1266,6 +1268,21 @@ cloudflare_dns_token_haruspex_secret = k8s.core.v1.Secret(
     ),
 )
 
+cloudflare_dns_token_sensibility_secret = k8s.core.v1.Secret(
+    "cloudflare-dns-token-sensibility",
+    metadata={
+        "name": "cloudflare-dns-token-sensibility",
+        "namespace": "cert-manager",
+    },
+    string_data={
+        "api-token": config.require_secret("cloudflare-dns-api-token-sensibility")
+    },
+    opts=pulumi.ResourceOptions(
+        provider=k8s_provider,
+        depends_on=[cert_manager_release],
+    ),
+)
+
 letsencrypt_dns01_issuer = k8s.apiextensions.CustomResource(
     "letsencrypt-dns01",
     api_version="cert-manager.io/v1",
@@ -1306,6 +1323,17 @@ letsencrypt_dns01_issuer = k8s.apiextensions.CustomResource(
                         }
                     },
                 },
+                {
+                    "selector": {"dnsZones": ["sensibility.money"]},
+                    "dns01": {
+                        "cloudflare": {
+                            "apiTokenSecretRef": {
+                                "name": "cloudflare-dns-token-sensibility",
+                                "key": "api-token",
+                            }
+                        }
+                    },
+                },
             ],
         }
     },
@@ -1315,6 +1343,7 @@ letsencrypt_dns01_issuer = k8s.apiextensions.CustomResource(
             cert_manager_release,
             cloudflare_dns_token_secret,
             cloudflare_dns_token_haruspex_secret,
+            cloudflare_dns_token_sensibility_secret,
         ],
     ),
 )
@@ -1465,7 +1494,7 @@ prod_health_checks = {
     "footstrike-api": ("api.footstrike.run", "/health"),
     "identity": ("identity.ethanswan.com", "/health"),
     "haruspex": ("haruspex.fyi", "/api/health"),
-    "asset-manager": ("assets.ethanswan.com", "/health"),
+    "asset-manager": ("sensibility.money", "/health"),
     "bifrost": ("bifrost.ethanswan.com", "/health"),
 }
 
