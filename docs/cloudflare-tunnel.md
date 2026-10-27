@@ -50,7 +50,7 @@ application** (the dashboard called these "Public Hostnames" until late 2026).
 | `app.footstrike.run` | `http://footstrike-dashboard.footstrike-dashboard-prod.svc.cluster.local:80` |
 | `api.footstrike.run` | `http://footstrike-api.footstrike-api-prod.svc.cluster.local:80` |
 | `identity.ethanswan.com` | `http://identity.identity-prod.svc.cluster.local` |
-| `sensibility.money` | `http://asset-manager.asset-manager-prod.svc.cluster.local:80` |
+| `sensibility.money` | `http://sensibility.sensibility-prod.svc.cluster.local:80` |
 | `haruspex.fyi` | `http://haruspex.haruspex-prod.svc.cluster.local` |
 | `bifrost.ethanswan.com` | `http://bifrost.bifrost-prod.svc.cluster.local` |
 
