@@ -294,6 +294,22 @@ asset_manager_prod_sa = serviceaccount.Account(
     display_name="Asset Manager Prod Service Account",
     project=project,
 )
+# asset-manager is becoming sensibility (Oct 2026), the way forecasting became
+# haruspex: service accounts, secrets and namespaces have no rename, so the
+# sensibility identity is built alongside, traffic is cut over, and the
+# asset-manager-* resources above are then deleted.
+sensibility_staging_sa = serviceaccount.Account(
+    "sensibility-staging-sa",
+    account_id="sensibility-staging-sa",
+    display_name="Sensibility Staging Service Account",
+    project=project,
+)
+sensibility_prod_sa = serviceaccount.Account(
+    "sensibility-prod-sa",
+    account_id="sensibility-prod-sa",
+    display_name="Sensibility Prod Service Account",
+    project=project,
+)
 # This service is named haruspex everywhere now. It was `forecasting` until
 # Sept 2026; the rename could not happen in place because service accounts,
 # secrets and namespaces have no rename operation, so the haruspex identity was
@@ -381,6 +397,18 @@ asset_manager_staging_wi = serviceaccount.IAMMember(
     service_account_id=asset_manager_staging_sa.name,
     role="roles/iam.workloadIdentityUser",
     member=f"serviceAccount:{project}.svc.id.goog[asset-manager-staging/asset-manager-staging-ksa]",
+)
+sensibility_prod_wi = serviceaccount.IAMMember(
+    "sensibility-prod-workload-identity",
+    service_account_id=sensibility_prod_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[sensibility-prod/sensibility-prod-ksa]",
+)
+sensibility_staging_wi = serviceaccount.IAMMember(
+    "sensibility-staging-workload-identity",
+    service_account_id=sensibility_staging_sa.name,
+    role="roles/iam.workloadIdentityUser",
+    member=f"serviceAccount:{project}.svc.id.goog[sensibility-staging/sensibility-staging-ksa]",
 )
 haruspex_prod_wi = serviceaccount.IAMMember(
     "haruspex-prod-workload-identity",
@@ -503,6 +531,24 @@ secret_access = {
             "asset_manager_staging_client_id",
             "asset_manager_staging_client_secret",
             "asset_manager_staging_secret_key",
+        ],
+    ),
+    "sensibility-prod": (
+        sensibility_prod_sa,
+        [
+            "sensibility_prod_database_url",
+            "sensibility_prod_client_id",
+            "sensibility_prod_client_secret",
+            "sensibility_prod_secret_key",
+        ],
+    ),
+    "sensibility-staging": (
+        sensibility_staging_sa,
+        [
+            "sensibility_staging_database_url",
+            "sensibility_staging_client_id",
+            "sensibility_staging_client_secret",
+            "sensibility_staging_secret_key",
         ],
     ),
     "haruspex-prod": (
@@ -640,6 +686,16 @@ secret_names = [
     "asset_manager_staging_client_id",
     "asset_manager_staging_client_secret",
     "asset_manager_staging_secret_key",
+    # sensibility prod (values copied from asset_manager_prod_*)
+    "sensibility_prod_database_url",
+    "sensibility_prod_client_id",
+    "sensibility_prod_client_secret",
+    "sensibility_prod_secret_key",
+    # sensibility staging (values copied from asset_manager_staging_*)
+    "sensibility_staging_database_url",
+    "sensibility_staging_client_id",
+    "sensibility_staging_client_secret",
+    "sensibility_staging_secret_key",
     # haruspex prod (rename phase 1; values copied from forecasting_prod_*)
     "haruspex_prod_database_url",
     "haruspex_prod_jwt_secret",
@@ -749,10 +805,11 @@ identity_build = cloudbuild.Trigger(
     project=project,
     service_account=cloud_build_sa,
 )
-# The GitHub repo was renamed asset_manager -> sensibility (Oct 2026); the
-# trigger, image and namespaces keep the old name.
-asset_manager_build = cloudbuild.Trigger(
-    "asset-manager-build",
+# Renamed from asset-manager-build. bifrost links a service's builds through
+# the "{registry key}-build" trigger, so its registry key moves to
+# sensibility alongside.
+sensibility_build = cloudbuild.Trigger(
+    "sensibility-build",
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="sensibility",
@@ -761,7 +818,7 @@ asset_manager_build = cloudbuild.Trigger(
             branch="^main$",
         ),
     ),
-    name="asset-manager-build",
+    name="sensibility-build",
     project=project,
     service_account=cloud_build_sa,
 )
