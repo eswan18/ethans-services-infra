@@ -42,7 +42,8 @@ recovery.
 ## Public hostnames
 
 Seven, all proxied through Cloudflare to in-cluster Services over the tunnel.
-Recreate under **Networks → Tunnels → your tunnel → Public Hostname**.
+Recreate under **Networks → Tunnels → your tunnel → Routes → Add route → Published
+application** (the dashboard called these "Public Hostnames" until late 2026).
 
 | Public hostname | Service URL |
 |---|---|
@@ -50,6 +51,7 @@ Recreate under **Networks → Tunnels → your tunnel → Public Hostname**.
 | `api.footstrike.run` | `http://footstrike-api.footstrike-api-prod.svc.cluster.local:80` |
 | `identity.ethanswan.com` | `http://identity.identity-prod.svc.cluster.local` |
 | `assets.ethanswan.com` | `http://asset-manager.asset-manager-prod.svc.cluster.local` |
+| `sensibility.money` | `http://asset-manager.asset-manager-prod.svc.cluster.local:80` |
 | `haruspex.fyi` | `http://haruspex.haruspex-prod.svc.cluster.local` |
 | `bifrost.ethanswan.com` | `http://bifrost.bifrost-prod.svc.cluster.local` |
 
@@ -116,7 +118,11 @@ Each hostname is a **proxied** record pointing at
 proxied, `dig` returns Cloudflare edge addresses (`104.21.x` / `172.67.x`)
 rather than the CNAME target — that is expected and not a misconfiguration.
 
-Zones: `footstrike.run`, `ethanswan.com` and `haruspex.fyi`.
+Zones: `footstrike.run`, `ethanswan.com`, `haruspex.fyi` and `sensibility.money`.
+
+`sensibility.money` (Oct 2026) is asset_manager's new name; `assets.ethanswan.com`
+still routes to the same Service while the old name is phased out. When it
+becomes a redirect, keep its route and record (see `forecasting.ethanswan.com`).
 
 The `footstrike.run` apex record is the exception: it belongs to the
 `footstrike-site` Worker's custom domain, not to this tunnel.
@@ -126,7 +132,7 @@ Redirect Rule in the zone 301s it (path and query preserved) to the apex. Like
 `forecasting.ethanswan.com` above, the address it points at is never dialled,
 and deleting the record breaks the redirect.
 
-`haruspex.fyi` also carries a **grey-cloud (DNS-only)** `staging` CNAME to
+`haruspex.fyi` and `sensibility.money` each also carry a **grey-cloud (DNS-only)** `staging` CNAME to
 `staging-ingress.tailc06f30.ts.net`, which has nothing to do with this tunnel —
 it is the shared Tailscale ingress path described under "Deliberately not
 exposed" below. Do not orange-cloud it: Cloudflare's edge cannot route to a
