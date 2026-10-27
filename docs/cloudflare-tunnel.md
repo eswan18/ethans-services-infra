@@ -41,7 +41,7 @@ recovery.
 
 ## Public hostnames
 
-Seven, all proxied through Cloudflare to in-cluster Services over the tunnel.
+Six, all proxied through Cloudflare to in-cluster Services over the tunnel.
 Recreate under **Networks → Tunnels → your tunnel → Routes → Add route → Published
 application** (the dashboard called these "Public Hostnames" until late 2026).
 
@@ -50,7 +50,6 @@ application** (the dashboard called these "Public Hostnames" until late 2026).
 | `app.footstrike.run` | `http://footstrike-dashboard.footstrike-dashboard-prod.svc.cluster.local:80` |
 | `api.footstrike.run` | `http://footstrike-api.footstrike-api-prod.svc.cluster.local:80` |
 | `identity.ethanswan.com` | `http://identity.identity-prod.svc.cluster.local` |
-| `assets.ethanswan.com` | `http://asset-manager.asset-manager-prod.svc.cluster.local` |
 | `sensibility.money` | `http://asset-manager.asset-manager-prod.svc.cluster.local:80` |
 | `haruspex.fyi` | `http://haruspex.haruspex-prod.svc.cluster.local` |
 | `bifrost.ethanswan.com` | `http://bifrost.bifrost-prod.svc.cluster.local` |
@@ -120,9 +119,9 @@ rather than the CNAME target — that is expected and not a misconfiguration.
 
 Zones: `footstrike.run`, `ethanswan.com`, `haruspex.fyi` and `sensibility.money`.
 
-`sensibility.money` (Oct 2026) is asset_manager's new name; `assets.ethanswan.com`
-still routes to the same Service while the old name is phased out. When it
-becomes a redirect, keep its route and record (see `forecasting.ethanswan.com`).
+`sensibility.money` (Oct 2026) is asset_manager's new name. Its old host,
+`assets.ethanswan.com`, was deleted outright (route and record) rather than
+redirected: it had one user.
 
 The `footstrike.run` apex record is the exception: it belongs to the
 `footstrike-site` Worker's custom domain, not to this tunnel.
