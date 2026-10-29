@@ -23,6 +23,9 @@ project = "ethans-services"
 region = "us-central1"
 zone = "us-central1-a"
 github_owner = "eswan18"
+# The Footstrike repos live in their own GitHub org (moved Oct 2026); everything else
+# stays under github_owner.
+footstrike_github_owner = "Footstrike"
 cloud_build_sa = f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com"
 
 # Artifact Registry repository
@@ -716,7 +719,7 @@ footstrike_api_build = cloudbuild.Trigger(
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="footstrike-api",
-        owner=github_owner,
+        owner=footstrike_github_owner,
         push=cloudbuild.TriggerGithubPushArgs(
             branch="^main$",
         ),
@@ -730,7 +733,7 @@ footstrike_dashboard_build = cloudbuild.Trigger(
     filename="cloudbuild.yaml",
     github=cloudbuild.TriggerGithubArgs(
         name="footstrike-dashboard",
-        owner=github_owner,
+        owner=footstrike_github_owner,
         push=cloudbuild.TriggerGithubPushArgs(
             branch="^main$",
         ),
@@ -829,11 +832,11 @@ bifrost_build = cloudbuild.Trigger(
 # from its own element of the pair rather than one variable serving both.
 # haruspex's pair was unequal too until Sept 2026, when the registry key caught
 # up with the repo rename; keeping both elements is what let them differ then.
-for preview_key, preview_repo in [
-    ("footstrike-api", "footstrike-api"),
-    ("footstrike-dashboard", "footstrike-dashboard"),
-    ("identity", "identity"),
-    ("haruspex", "haruspex"),
+for preview_key, preview_repo, preview_owner in [
+    ("footstrike-api", "footstrike-api", footstrike_github_owner),
+    ("footstrike-dashboard", "footstrike-dashboard", footstrike_github_owner),
+    ("identity", "identity", github_owner),
+    ("haruspex", "haruspex", github_owner),
 ]:
     cloudbuild.Trigger(
         f"{preview_key}-preview-build",
@@ -841,13 +844,13 @@ for preview_key, preview_repo in [
         project=project,
         service_account=cloud_build_sa,
         source_to_build=cloudbuild.TriggerSourceToBuildArgs(
-            uri=f"https://github.com/{github_owner}/{preview_repo}",
+            uri=f"https://github.com/{preview_owner}/{preview_repo}",
             ref="refs/heads/main",
             repo_type="GITHUB",
         ),
         git_file_source=cloudbuild.TriggerGitFileSourceArgs(
             path="cloudbuild-preview.yaml",
-            uri=f"https://github.com/{github_owner}/{preview_repo}",
+            uri=f"https://github.com/{preview_owner}/{preview_repo}",
             revision="refs/heads/main",
             repo_type="GITHUB",
         ),
