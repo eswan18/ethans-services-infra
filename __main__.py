@@ -551,6 +551,7 @@ secret_access = {
             "bifrost_prod_oidc_client_secret",
             "bifrost_prod_session_secret",
             "bifrost_prod_github_token",
+            "bifrost_prod_github_token_footstrike",
             "bifrost_prod_neon_api_key",
             "bifrost_prod_preview_api_token",
         ],
@@ -671,6 +672,7 @@ secret_names = [
     "bifrost_prod_oidc_client_secret",
     "bifrost_prod_session_secret",
     "bifrost_prod_github_token",
+    "bifrost_prod_github_token_footstrike",
     "bifrost_prod_neon_api_key",
     "bifrost_prod_preview_api_token",
     # bifrost staging
