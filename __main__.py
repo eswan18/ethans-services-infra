@@ -26,7 +26,8 @@ github_owner = "eswan18"
 # The Footstrike repos live in their own GitHub org (moved Oct 2026); everything else
 # stays under github_owner.
 footstrike_github_owner = "Footstrike"
-cloud_build_sa = f"projects/{project}/serviceAccounts/754418346661-compute@developer.gserviceaccount.com"
+project_number = "754418346661"
+cloud_build_sa = f"projects/{project}/serviceAccounts/{project_number}-compute@developer.gserviceaccount.com"
 
 # Artifact Registry repository
 container_registry = artifactregistry.Repository(
@@ -893,8 +894,53 @@ pubsub_config = {
     },
 }
 
+# Pub/Sub's own service agent: it is what moves a message to a dead-letter
+# topic, so it needs to publish there and to subscribe to the source.
+pubsub_service_agent = (
+    f"serviceAccount:service-{project_number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+)
+
+# Retry and dead-lettering for every comms subscription. comms nacks any
+# message it fails to send, and without these Pub/Sub redelivered it at once,
+# forever, until retention dropped it after 7 days: a malformed event or an
+# address Resend rejects for good was retried nonstop. Now a nack backs off
+# (10s doubling to 10min), and after 15 attempts -- about an hour and a half,
+# long enough to ride out a Resend blip -- the message is parked on the
+# environment's dead-letter topic instead.
+COMMS_MAX_DELIVERY_ATTEMPTS = 15
+COMMS_RETRY_POLICY = {"minimum_backoff": "10s", "maximum_backoff": "600s"}
+
 pubsub_topics = {}
-for env_config in pubsub_config.values():
+for env, env_config in pubsub_config.items():
+    # One dead-letter topic per environment, shared by every comms
+    # subscription in it. A topic keeps nothing by itself, so it gets a
+    # subscription that nothing consumes: that is where dead letters wait to
+    # be read, with
+    #   gcloud pubsub subscriptions pull comms-dead-letters-{env}-sub --limit=10
+    # (add --auto-ack to clear them). It must never expire: an idle
+    # subscription is deleted after 31 days by default, and this one is idle
+    # by design. The prod one is alerted on below.
+    dead_letter_topic = pubsub.Topic(
+        f"comms-dead-letters-{env}",
+        name=f"comms-dead-letters-{env}",
+        project=project,
+    )
+    pubsub.TopicIAMMember(
+        f"comms-dead-letters-{env}-publisher-pubsub-agent",
+        project=project,
+        topic=dead_letter_topic.name,
+        role="roles/pubsub.publisher",
+        member=pubsub_service_agent,
+    )
+    pubsub.Subscription(
+        f"comms-dead-letters-{env}-sub",
+        name=f"comms-dead-letters-{env}-sub",
+        topic=dead_letter_topic.name,
+        project=project,
+        message_retention_duration="1209600s",  # 14 days
+        expiration_policy={"ttl": ""},
+    )
+
     for topic_name, publisher_sa in env_config["topics"].items():
         topic = pubsub.Topic(
             topic_name,
@@ -920,6 +966,21 @@ for env_config in pubsub_config.values():
             topic=pubsub_topics[topic_name].name,
             project=project,
             ack_deadline_seconds=60,
+            retry_policy=COMMS_RETRY_POLICY,
+            dead_letter_policy={
+                "dead_letter_topic": dead_letter_topic.id,
+                "max_delivery_attempts": COMMS_MAX_DELIVERY_ATTEMPTS,
+            },
+        )
+
+        # Dead-lettering acks the message on the source subscription, which
+        # the service agent may only do as a subscriber of it.
+        pubsub.SubscriptionIAMMember(
+            f"{sub_name}-subscriber-pubsub-agent",
+            project=project,
+            subscription=subscription.name,
+            role="roles/pubsub.subscriber",
+            member=pubsub_service_agent,
         )
 
         # Grant comms permission to consume
@@ -1643,6 +1704,59 @@ monitoring.AlertPolicy(
         ),
         "mime_type": "text/markdown",
         "subject": "GCP Pod Crash Loop",
+    },
+)
+
+# A comms email in prod gave up after every retry and was dead-lettered (see
+# the Pub/Sub section). Nothing else would say so: comms acked nothing, the
+# reader got nothing, and the message just sits there.
+monitoring.AlertPolicy(
+    "comms-dead-letter-alert",
+    display_name="Comms Dead Letters",
+    project=project,
+    combiner="OR",
+    enabled=True,
+    conditions=[
+        {
+            "display_name": "Undelivered messages on comms-dead-letters-prod-sub",
+            "condition_threshold": {
+                "filter": (
+                    'resource.type = "pubsub_subscription" AND metric.type ='
+                    ' "pubsub.googleapis.com/subscription/num_undelivered_messages"'
+                    " AND resource.label.subscription_id ="
+                    ' "comms-dead-letters-prod-sub"'
+                ),
+                "aggregations": [
+                    {
+                        "alignment_period": "300s",
+                        "per_series_aligner": "ALIGN_MAX",
+                    }
+                ],
+                "comparison": "COMPARISON_GT",
+                "threshold_value": 0,
+                "duration": "0s",
+                "trigger": {"count": 1},
+            },
+        }
+    ],
+    notification_channels=[alert_email_channel.name],
+    alert_strategy={
+        "auto_close": "259200s",
+        "notification_prompts": ["OPENED"],
+    },
+    documentation={
+        "content": (
+            "comms failed to send at least one prod email after every retry,"
+            " and Pub/Sub moved it to the dead-letter subscription.\n\nTo see"
+            " them (correlation_id and event_type are in each body):\ngcloud"
+            " pubsub subscriptions pull comms-dead-letters-prod-sub --limit=10"
+            "\n\nThen find why in comms' logs:\nkubectl logs -n comms-prod"
+            " deploy/comms | grep <correlation_id>\n\nOnce handled, clear them"
+            " by pulling again with --auto-ack. The alert closes when the"
+            " subscription is empty."
+        ),
+        "mime_type": "text/markdown",
+        "subject": "GCP Comms Dead Letters",
     },
 )
 
