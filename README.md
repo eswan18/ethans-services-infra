@@ -53,8 +53,15 @@ Infrastructure as code for Ethan's services, using Pulumi with Python on GCP.
   managed by hand in the Cloudflare dashboard.
 
 - **Monitoring** — uptime checks against each prod health endpoint, the email
-  notification channel, and both alert policies (`Pod Crash Loop`,
-  `Prod Uptime Check Failure`).
+  notification channel, and the three alert policies (`Pod Crash Loop`,
+  `Prod Uptime Check Failure`, `Comms Dead Letters`).
+
+- **Pub/Sub dead letters** — every comms subscription backs off on a nack
+  (10s doubling to 10min) and, after 15 attempts, moves the message to
+  `comms-dead-letters-{env}`, which keeps it on `comms-dead-letters-{env}-sub`
+  for 14 days. Read them with
+  `gcloud pubsub subscriptions pull comms-dead-letters-prod-sub --limit=10`
+  (add `--auto-ack` to clear them). Prod alerts by email when any arrive.
 
 - **ArgoCD bootstrap secrets** (namespace `argocd`) — `gar-pull-secret` for
   Artifact Registry (Pulumi mints the service-account key itself, so there is
