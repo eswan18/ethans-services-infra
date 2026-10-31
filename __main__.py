@@ -664,6 +664,9 @@ secret_names = [
     # haruspex build (used by Cloud Build, not the app). Keeps its old name:
     # cloudbuild.yaml names it literally, so it moves with the build-side rename.
     "forecasting_sentry_auth_token",
+    # haruspex build: pins Next's server action IDs across deploys, so a page
+    # open during a rollout can still submit. Any stable base64 32-byte value.
+    "haruspex_server_actions_encryption_key",
     # comms prod
     "comms_prod_resend_api_key",
     # comms staging
@@ -712,6 +715,13 @@ cloud_build_sentry_access = secretmanager.SecretIamMember(
     "cloud-build-access-forecasting_sentry_auth_token",
     project=project,
     secret_id=secrets["forecasting_sentry_auth_token"].secret_id,
+    role="roles/secretmanager.secretAccessor",
+    member=f"serviceAccount:{cloud_build_sa_email}",
+)
+cloud_build_haruspex_actions_key_access = secretmanager.SecretIamMember(
+    "cloud-build-access-haruspex_server_actions_encryption_key",
+    project=project,
+    secret_id=secrets["haruspex_server_actions_encryption_key"].secret_id,
     role="roles/secretmanager.secretAccessor",
     member=f"serviceAccount:{cloud_build_sa_email}",
 )
