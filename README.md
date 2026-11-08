@@ -94,7 +94,7 @@ Google publishes no Helm chart for the GCP provider plugin, so
 is what keeps a bump to a one-line diff:
 
 ```bash
-TAG=v1.18.0   # whatever is newest
+TAG=v1.19.0   # whatever is newest
 curl -sSf -o k8s/secrets-store-csi-driver-provider-gcp.yaml \
   "https://raw.githubusercontent.com/GoogleCloudPlatform/secrets-store-csi-driver-provider-gcp/$TAG/deploy/provider-gcp-plugin.yaml"
 git diff      # expect the image digest to change, and nothing else
@@ -102,7 +102,7 @@ pulumi up
 ```
 
 Upstream pins the image by digest, so that digest line *is* the version. Check
-the [changelog][csi-changelog] first; everything through v1.17.0 has been Go and
+the [changelog][csi-changelog] first; everything through v1.19.0 has been Go and
 dependency bumps with no breaking changes.
 
 **Don't let this drift.** Google deprecates old plugin images in Artifact
