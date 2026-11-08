@@ -1058,7 +1058,7 @@ tailscale_namespace = k8s.core.v1.Namespace(
 argocd_release = k8s.helm.v3.Release(
     "argocd",
     chart="argo-cd",
-    version="10.11.1",
+    version="10.15.0",
     namespace="argocd",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://argoproj.github.io/argo-helm",
@@ -1111,7 +1111,7 @@ argocd_release = k8s.helm.v3.Release(
 argocd_image_updater_release = k8s.helm.v3.Release(
     "argocd-image-updater",
     chart="argocd-image-updater",
-    version="1.3.2",
+    version="1.4.2",
     namespace="argocd",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://argoproj.github.io/argo-helm",
@@ -1228,7 +1228,7 @@ github_repocreds_secret = k8s.core.v1.Secret(
 csi_secrets_store_release = k8s.helm.v3.Release(
     "csi-secrets-store",
     chart="secrets-store-csi-driver",
-    version="1.6.1",
+    version="1.6.2",
     namespace="kube-system",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts",
@@ -1246,7 +1246,7 @@ csi_secrets_store_release = k8s.helm.v3.Release(
 )
 
 # Secret Manager CSI provider plugin (GCP). Vendored verbatim from upstream's
-# deploy/provider-gcp-plugin.yaml at v1.17.0: Google publishes no Helm chart
+# deploy/provider-gcp-plugin.yaml at v1.19.0: Google publishes no Helm chart
 # for it, so the raw manifest is the supported install path. To bump, re-fetch
 # the file at the new tag and `pulumi up` (see README).
 #
@@ -1265,7 +1265,7 @@ csi_provider_gcp = k8s.yaml.v2.ConfigFile(
 tailscale_operator_release = k8s.helm.v3.Release(
     "tailscale-operator",
     chart="tailscale-operator",
-    version="1.104.2",
+    version="1.104.4",
     namespace="tailscale",
     repository_opts=k8s.helm.v3.RepositoryOptsArgs(
         repo="https://pkgs.tailscale.com/helmcharts",
