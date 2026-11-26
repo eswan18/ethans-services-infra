@@ -517,6 +517,7 @@ secret_access = {
         haruspex_prod_sa,
         [
             "haruspex_prod_database_url",
+            "haruspex_prod_migrate_database_url",
             "haruspex_prod_jwt_secret",
             "haruspex_prod_argon2_salt",
             "haruspex_prod_idp_client_id",
@@ -527,6 +528,7 @@ secret_access = {
         haruspex_staging_sa,
         [
             "haruspex_staging_database_url",
+            "haruspex_staging_migrate_database_url",
             "haruspex_staging_jwt_secret",
             "haruspex_staging_argon2_salt",
             "haruspex_staging_idp_client_id",
@@ -655,12 +657,17 @@ secret_names = [
     "haruspex_prod_argon2_salt",
     "haruspex_prod_idp_client_id",
     "haruspex_prod_idp_client_secret",
+    # The neondb_owner connection string (direct host, not -pooler), read only by
+    # the `migrate` initContainer that applies migrations on deploy; the app
+    # itself runs as app_user.
+    "haruspex_prod_migrate_database_url",
     # haruspex staging (rename phase 1; values copied from forecasting_staging_*)
     "haruspex_staging_database_url",
     "haruspex_staging_jwt_secret",
     "haruspex_staging_argon2_salt",
     "haruspex_staging_idp_client_id",
     "haruspex_staging_idp_client_secret",
+    "haruspex_staging_migrate_database_url",
     # haruspex build (used by Cloud Build, not the app). Keeps its old name:
     # cloudbuild.yaml names it literally, so it moves with the build-side rename.
     "forecasting_sentry_auth_token",
